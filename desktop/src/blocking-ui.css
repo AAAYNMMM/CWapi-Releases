@@ -1,0 +1,55 @@
+.blocking-ui-content {
+  min-height: 100vh;
+}
+
+.blocking-ui-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  background: rgba(247, 248, 250, 0.68);
+  backdrop-filter: blur(2px);
+  cursor: wait;
+  user-select: none;
+}
+
+.blocking-ui-indicator {
+  min-width: 148px;
+  max-width: min(360px, calc(100vw - 48px));
+  padding: 18px 22px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 16px 44px rgba(17, 24, 39, 0.14);
+  color: #374151;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.blocking-ui-spinner {
+  width: 30px;
+  height: 30px;
+  border: 3px solid rgba(17, 24, 39, 0.12);
+  border-top-color: rgba(17, 24, 39, 0.72);
+  border-radius: 50%;
+  animation: cwapi-blocking-spin 0.8s linear infinite;
+}
+
+@keyframes cwapi-blocking-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .blocking-ui-spinner {
+    animation-duration: 1.6s;
+  }
+}

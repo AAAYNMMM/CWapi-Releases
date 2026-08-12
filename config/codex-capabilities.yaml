@@ -1,0 +1,60 @@
+schema: "cwapi.codex-capabilities.v1"
+
+# 这里列出的权限 profile 才能被 TASK 选择。
+# :workspace 是默认无公网 profile；cwapi-network 需要在私有 CODEX_HOME/config.toml 中定义。
+permission_profiles:
+  - ":workspace"
+  - "cwapi-network"
+
+mcp:
+  servers:
+    # 浏览器 MCP 的进程配置位于私有 CODEX_HOME/config.toml。
+    # 这里只控制 CWapi 是否允许调用该 server 的 tool/resource。
+    playwright:
+      tools:
+        - "browser_click"
+        - "browser_close"
+        - "browser_console_messages"
+        - "browser_drag"
+        - "browser_drop"
+        - "browser_fill_form"
+        - "browser_find"
+        - "browser_handle_dialog"
+        - "browser_hover"
+        - "browser_navigate"
+        - "browser_navigate_back"
+        - "browser_network_requests"
+        - "browser_press_key"
+        - "browser_resize"
+        - "browser_select_option"
+        - "browser_snapshot"
+        - "browser_tabs"
+        - "browser_take_screenshot"
+        - "browser_type"
+        - "browser_wait_for"
+      resource_uri_prefixes: []
+
+browser:
+  server: "playwright"
+
+filesystem:
+  roots:
+    workspace:
+      path: "{workspace}"
+      read: true
+      write: true
+    task_results:
+      path: "{task_results}"
+      read: true
+      write: true
+    task_temp:
+      path: "{task_temp}"
+      read: true
+      write: true
+
+limits:
+  max_mcp_arguments_bytes: 262144
+  max_fs_write_bytes: 16777216
+  max_session_interactions: 100
+  max_session_output_bytes: 67108864
+  max_watch_wait_ms: 60000

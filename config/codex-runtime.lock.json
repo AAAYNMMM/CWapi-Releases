@@ -1,0 +1,22 @@
+{
+  "schema": "cwapi.codex-runtime-lock.v1",
+  "state": "source_ready",
+  "install_transport": "github_release",
+  "repository": "AAAYNMMM/codex",
+  "repository_url": "https://github.com/AAAYNMMM/codex.git",
+  "upstream_repository": "openai/codex",
+  "source_ref": "rust-v0.144.4",
+  "source_commit": "8c68d4c87dc54d38861f5114e920c3de2efa5876",
+  "target": "x86_64-pc-windows-msvc",
+  "version": "0.144.4-cwapi.1",
+  "archive_name": "codex-package-x86_64-pc-windows-msvc.zip",
+  "release_repository": "AAAYNMMM/codex",
+  "release_tag": "rust-v0.144.4",
+  "release_asset": "codex-package-x86_64-pc-windows-msvc.tar.gz",
+  "release_asset_url": "https://github.com/AAAYNMMM/codex/releases/download/rust-v0.144.4/codex-package-x86_64-pc-windows-msvc.tar.gz",
+  "archive_sha256": "7f41b38da27e41f0fd3509e0e247bf05b7a9b6105565d70ac2be4cc79b64f1fe",
+  "executable_sha256": "51398051c2332b6afe08dc3b9dbb4056085c197f35ca57a307ee303d450cada5",
+  "release_manifest_asset": "cwapi-codex-runtime-x86_64-pc-windows-msvc.json",
+  "upstream_release_repository": "openai/codex",
+  "upstream_checksum_asset": "codex-package_SHA256SUMS"
+}
