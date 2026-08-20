@@ -40,9 +40,9 @@ func TestServiceProjectWriteReturnsCurrentSnapshot(t *testing.T) {
 
 	afterAdd, err := service.AddProject(ProjectCommand{
 		DisplayName: "CWapi test",
-		Repository:  "AAAYNMMM/CWapi-test",
+		Repository:  "example/example-project",
 		LocalPath:   projectPath,
-		RemoteURL:   "https://github.com/AAAYNMMM/CWapi-test.git",
+		RemoteURL:   "https://github.com/example/example-project.git",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -54,9 +54,9 @@ func TestServiceProjectWriteReturnsCurrentSnapshot(t *testing.T) {
 
 	afterUpdate, err := service.UpdateProject(id, ProjectCommand{
 		DisplayName: "CWapi renamed",
-		Repository:  "AAAYNMMM/CWapi-test",
+		Repository:  "example/example-project",
 		LocalPath:   projectPath,
-		RemoteURL:   "https://github.com/AAAYNMMM/CWapi-test.git",
+		RemoteURL:   "https://github.com/example/example-project.git",
 	})
 	if err != nil {
 		t.Fatal(err)

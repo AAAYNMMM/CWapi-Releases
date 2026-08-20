@@ -11,10 +11,10 @@ import (
 func TestProtocolHelpExplainsDiscoveryAndConfiguredProjectID(t *testing.T) {
 	cfg := config.Default()
 	cfg.Projects = []config.Project{{
-		ID: "prj-0123456789abcdef01234567", DisplayName: "CWapi-test", Repository: "AAAYNMMM/CWapi-test", LocalPath: `E:\private\CWapi-test`,
+		ID: "prj-0123456789abcdef01234567", DisplayName: "example-project", Repository: "example/example-project", LocalPath: `E:\private\example-project`,
 	}}
 	text := protocolHelpText(cfg, "CWAPIHELP4000")
-	for _, required := range []string{"CWapi v1.6.0", "source_commit=", "projects/list", "project_id", "expected_commit", "command + argv", "powershell.exe", ".venv/Scripts/python.exe", "node_modules/.bin/tool.cmd", "C:/...", "CWAPIHELP4000", "prj-0123456789abcdef01234567", "AAAYNMMM/CWapi-test"} {
+	for _, required := range []string{"CWapi v1.6.0", "source_commit=", "projects/list", "project_id", "expected_commit", "command + argv", "powershell.exe", ".venv/Scripts/python.exe", "node_modules/.bin/tool.cmd", "C:/...", "CWAPIHELP4000", "prj-0123456789abcdef01234567", "example/example-project"} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("help missing %q: %s", required, text)
 		}

@@ -13,6 +13,8 @@ git diff --check
 
 前端/Wails 改动按需运行 typecheck、React build、Wails Windows build。
 
+可选的真实 remote exact-commit integration 不绑定发行者自己的验收仓库。启用 `CWAPI_RUN_REMOTE_EXACT_COMMIT=1` 时，同时提供 `CWAPI_REMOTE_EXACT_REPOSITORY`、`CWAPI_REMOTE_EXACT_URL` 与 40 位 `CWAPI_REMOTE_EXACT_COMMIT`，再运行对应 Go test。
+
 ## Public portable gate
 
 发行包必须从 clean exact commit 构建：

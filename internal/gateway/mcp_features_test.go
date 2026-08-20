@@ -142,8 +142,8 @@ func TestProjectsListDiscoversStableIDsWithoutLocalPaths(t *testing.T) {
 func TestMCPServerStatusIncludesCWapiProjectDiscovery(t *testing.T) {
 	cfg := config.Default()
 	cfg.Projects = []config.Project{{
-		ID: "prj-aaaaaaaaaaaaaaaaaaaaaaaa", DisplayName: "CWapi-test",
-		Repository: "AAAYNMMM/CWapi-test", LocalPath: `E:\private\CWapi-test`,
+		ID: "prj-aaaaaaaaaaaaaaaaaaaaaaaa", DisplayName: "example-project",
+		Repository: "example/example-project", LocalPath: `E:\private\example-project`,
 	}}
 	gateway, _, poster := newFeatureGateway(t, cfg, featureToolhost{result: map[string]any{"data": []any{}}})
 	request := protocol.MCPRequest{
@@ -273,8 +273,8 @@ func TestPrepareCWapiProcessCallInjectsTrustedExactCommitContext(t *testing.T) {
 func TestProcessContextErrorIncludesConfiguredProjectID(t *testing.T) {
 	cfg := config.Default()
 	cfg.Projects = []config.Project{{
-		ID: "prj-aaaaaaaaaaaaaaaaaaaaaaaa", DisplayName: "CWapi-test",
-		Repository: "AAAYNMMM/CWapi-test", LocalPath: `E:\private\CWapi-test`,
+		ID: "prj-aaaaaaaaaaaaaaaaaaaaaaaa", DisplayName: "example-project",
+		Repository: "example/example-project", LocalPath: `E:\private\example-project`,
 	}}
 	gateway, _, poster := newFeatureGateway(t, cfg, featureToolhost{})
 	request := protocol.MCPRequest{
@@ -299,8 +299,8 @@ func TestProcessContextErrorIncludesConfiguredProjectID(t *testing.T) {
 func TestUnknownProjectErrorIncludesCurrentDiscovery(t *testing.T) {
 	cfg := config.Default()
 	cfg.Projects = []config.Project{{
-		ID: "prj-aaaaaaaaaaaaaaaaaaaaaaaa", DisplayName: "CWapi-test",
-		Repository: "AAAYNMMM/CWapi-test", LocalPath: `E:\private\CWapi-test`,
+		ID: "prj-aaaaaaaaaaaaaaaaaaaaaaaa", DisplayName: "example-project",
+		Repository: "example/example-project", LocalPath: `E:\private\example-project`,
 	}}
 	gateway, _, poster := newFeatureGateway(t, cfg, nil)
 	if err := gateway.AttachMCPRuntime(MCPRuntime{
@@ -319,7 +319,7 @@ func TestUnknownProjectErrorIncludesCurrentDiscovery(t *testing.T) {
 	response := decodeFeatureResponse(t, poster)
 	if response.Error == nil || response.Error.Code != "MCP_PROJECT_PREPARE_FAILED" ||
 		!strings.Contains(response.Error.Message, "project_id=prj-aaaaaaaaaaaaaaaaaaaaaaaa") ||
-		!strings.Contains(response.Error.Message, "AAAYNMMM/CWapi-test") {
+		!strings.Contains(response.Error.Message, "example/example-project") {
 		t.Fatalf("response=%#v", response)
 	}
 }

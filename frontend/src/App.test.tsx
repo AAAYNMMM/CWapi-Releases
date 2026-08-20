@@ -43,9 +43,9 @@ function project(displayName: string): app.ProjectSnapshot {
   return new app.ProjectSnapshot({
     id: "prj-0123456789abcdef01234567",
     display_name: displayName,
-    repository: "AAAYNMMM/CWapi-test",
-    local_path: "E:\\Projects\\CWapi-test",
-    remote_url: "https://github.com/AAAYNMMM/CWapi-test.git",
+    repository: "example/example-project",
+    local_path: "E:\\Projects\\example-project",
+    remote_url: "https://github.com/example/example-project.git",
   });
 }
 
@@ -249,15 +249,15 @@ describe("v1.6 simple MCP desktop", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "添加项目" }));
     fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "CWapi test" } });
-    fireEvent.change(screen.getByLabelText("Local path"), { target: { value: "E:\\Projects\\CWapi-test" } });
-    fireEvent.change(screen.getByLabelText("Remote URL"), { target: { value: "https://github.com/AAAYNMMM/CWapi-test.git" } });
+    fireEvent.change(screen.getByLabelText("Local path"), { target: { value: "E:\\Projects\\example-project" } });
+    fireEvent.change(screen.getByLabelText("Remote URL"), { target: { value: "https://github.com/example/example-project.git" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
     expect(await screen.findByText("CWapi test")).toBeTruthy();
     expect(within(screen.getByTestId("project-prj-0123456789abcdef01234567")).getByText("prj-0123456789abcdef01234567")).toBeTruthy();
     expect(AddProject).toHaveBeenCalledTimes(1);
     const addCommand = vi.mocked(AddProject).mock.calls[0][0];
-    expect(addCommand.repository).toBe("AAAYNMMM/CWapi-test");
+    expect(addCommand.repository).toBe("example/example-project");
     expect(Object.keys(addCommand).sort()).toEqual(["display_name", "local_path", "remote_url", "repository"].sort());
 
     fireEvent.click(screen.getByRole("button", { name: "编辑" }));

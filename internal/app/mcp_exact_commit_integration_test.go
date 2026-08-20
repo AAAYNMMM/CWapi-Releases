@@ -15,12 +15,13 @@ func TestConfiguredProjectPreparesRemoteExactCommit(t *testing.T) {
 	if os.Getenv("CWAPI_RUN_REMOTE_EXACT_COMMIT") != "1" {
 		t.Skip("remote exact-commit integration gate is not enabled")
 	}
-	const (
-		projectID  = "prj-31b40bec519d94c9067d5e9e"
-		repository = "AAAYNMMM/CWapi-test"
-		remoteURL  = "https://github.com/AAAYNMMM/CWapi-test.git"
-		commit     = "5ff5dc1dd9563731e68b3d40da82314d93adbaa8"
-	)
+	const projectID = "prj-cccccccccccccccccccccccc"
+	repository := strings.TrimSpace(os.Getenv("CWAPI_REMOTE_EXACT_REPOSITORY"))
+	remoteURL := strings.TrimSpace(os.Getenv("CWAPI_REMOTE_EXACT_URL"))
+	commit := strings.TrimSpace(os.Getenv("CWAPI_REMOTE_EXACT_COMMIT"))
+	if repository == "" || remoteURL == "" || commit == "" {
+		t.Fatal("CWAPI_REMOTE_EXACT_REPOSITORY, CWAPI_REMOTE_EXACT_URL and CWAPI_REMOTE_EXACT_COMMIT are required")
+	}
 	root := t.TempDir()
 	projectPath := filepath.Join(root, "configured-project")
 	if err := os.MkdirAll(projectPath, 0o700); err != nil {
@@ -28,7 +29,7 @@ func TestConfiguredProjectPreparesRemoteExactCommit(t *testing.T) {
 	}
 	cfg := config.Default()
 	cfg.Projects = []config.Project{{
-		ID: projectID, DisplayName: "CWapi-test", Repository: repository,
+		ID: projectID, DisplayName: "remote-exact-project", Repository: repository,
 		LocalPath: projectPath, RemoteURL: remoteURL,
 	}}
 	configPath := filepath.Join(root, "config", "cwapi.json")

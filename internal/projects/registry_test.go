@@ -20,9 +20,9 @@ func TestProjectAddUpdateRemoveReturnAuthoritativeSnapshot(t *testing.T) {
 	projectPath := t.TempDir()
 	added, err := registry.Add(Input{
 		DisplayName: "CWapi test",
-		Repository:  "AAAYNMMM/CWapi-test",
+		Repository:  "example/example-project",
 		LocalPath:   projectPath,
-		RemoteURL:   "https://github.com/AAAYNMMM/CWapi-test.git",
+		RemoteURL:   "https://github.com/example/example-project.git",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -34,9 +34,9 @@ func TestProjectAddUpdateRemoveReturnAuthoritativeSnapshot(t *testing.T) {
 
 	updated, err := registry.Update(id, Input{
 		DisplayName: "CWapi renamed",
-		Repository:  "AAAYNMMM/CWapi-test",
+		Repository:  "example/example-project",
 		LocalPath:   projectPath,
-		RemoteURL:   "git@github.com:AAAYNMMM/CWapi-test.git",
+		RemoteURL:   "git@github.com:example/example-project.git",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -70,14 +70,14 @@ func TestRegisteredProjectIsTheOnlyRepositoryAuthority(t *testing.T) {
 	registry := NewRegistry(manager)
 	added, err := registry.Add(Input{
 		DisplayName: "Simple",
-		Repository:  "AAAYNMMM/CWapi-test",
+		Repository:  "example/example-project",
 		LocalPath:   t.TempDir(),
-		RemoteURL:   "https://github.com/AAAYNMMM/CWapi-test.git",
+		RemoteURL:   "https://github.com/example/example-project.git",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(added.Projects) != 1 || added.Projects[0].Repository != "AAAYNMMM/CWapi-test" {
+	if len(added.Projects) != 1 || added.Projects[0].Repository != "example/example-project" {
 		t.Fatalf("project was not registered: %#v", added.Projects)
 	}
 	encoded, err := json.Marshal(added)
