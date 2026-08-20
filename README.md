@@ -2,6 +2,8 @@
 
 CWapi 是面向个人 Windows 开发环境的 Slack MCP 桥接程序。Web GPT 通过 Slack 发送结构化 MCP 请求，CWapi 在用户配置的项目与 exact commit 上下文中调用本机 Codex CLI，再把结果或文件返回 Slack。
 
+使用中有任何问题，可加入“小黑盒群”，链接在帖子置顶评论。
+
 本仓库是公开发行仓库，当前工作树只保留 v1.6.0 的代码、文档与可复现构建配置。旧版本源码仅保留在 Git 历史中。
 
 ## 使用便携包
