@@ -97,7 +97,7 @@ if ($ExistingInstances.Count -ne 0) {
 }
 
 $ProbeBase = Join-Path ([System.IO.Path]::GetTempPath()) ('cwapi-public-release-' + [Guid]::NewGuid().ToString('N'))
-$InstallRoot = Join-Path $ProbeBase '任意路径 with spaces\CWapi-v1.6.0'
+$InstallRoot = Join-Path $ProbeBase '任意路径 with spaces - CWapi-v1.6.0'
 $WorkingRoot = Join-Path $ProbeBase 'unrelated working directory'
 New-Item -ItemType Directory -Force -Path $InstallRoot, $WorkingRoot | Out-Null
 
@@ -185,7 +185,14 @@ try {
     Stop-OwnedProcess -Process $Process
     Remove-TreeWithRetry -Path $InstallRoot -AllowedRoot $ProbeBase
     Remove-TreeWithRetry -Path $WorkingRoot -AllowedRoot $ProbeBase
-    if (Test-Path -LiteralPath $ProbeBase) { Remove-Item -LiteralPath $ProbeBase -Force }
+    if (Test-Path -LiteralPath $ProbeBase) {
+        $TemporaryRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\')
+        $ResolvedProbeBase = [System.IO.Path]::GetFullPath($ProbeBase).TrimEnd('\')
+        if (-not $ResolvedProbeBase.StartsWith($TemporaryRoot + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "CWAPI_PORTABLE_RELOCATION_BASE_CLEANUP_PATH_INVALID path=$ResolvedProbeBase root=$TemporaryRoot"
+        }
+        [System.IO.Directory]::Delete($ResolvedProbeBase, $false)
+    }
 }
 
 $Result | ConvertTo-Json -Compress | Write-Host
