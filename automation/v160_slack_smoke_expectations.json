@@ -1,0 +1,14 @@
+{
+  "schema": "cwapi.slack-mcp-e2e.expectations.v1",
+  "requests": [
+    {
+      "request_id": "GPTV160SMOKESTATUS",
+      "method": "mcpServerStatus/list",
+      "status": "completed",
+      "delivery_state": "delivered",
+      "min_request_messages": 1,
+      "min_events": 0,
+      "require_response": true
+    }
+  ]
+}

@@ -1,0 +1,103 @@
+{
+  "schema": "cwapi.slack-mcp-e2e.requests.v1",
+  "notes": [
+    "Replace <EXACT_40_CHAR_COMMIT> with the commit embedded in the validation CWapi.exe.",
+    "Send GPTV160PROJECTS001 first, then replace <PROJECT_ID_FROM_PROJECTS_LIST> with the project_id returned for the target repository.",
+    "Send each subject/body through the external Slack/Web GPT path. Do not have the CWapi bot self-inject requests.",
+    "Send GPTV160DUPSTATUS001 twice with the identical body to verify idempotency."
+  ],
+  "messages": [
+    {
+      "subject": "[CWapi/MCP/1][MCP_REQUEST][GPTV160PROJECTS001]",
+      "send_count": 1,
+      "body": {
+        "schema": "cwapi.mcp.request.v1",
+        "protocol_version": "cwapi-mcp/1",
+        "request_id": "GPTV160PROJECTS001",
+        "method": "projects/list",
+        "params": {}
+      }
+    },
+    {
+      "subject": "[CWapi/MCP/1][MCP_REQUEST][GPTV160STATUS001]",
+      "send_count": 1,
+      "body": {
+        "schema": "cwapi.mcp.request.v1",
+        "protocol_version": "cwapi-mcp/1",
+        "request_id": "GPTV160STATUS001",
+        "method": "mcpServerStatus/list",
+        "params": {}
+      }
+    },
+    {
+      "subject": "[CWapi/MCP/1][MCP_REQUEST][GPTV160COMMAND001]",
+      "send_count": 1,
+      "body": {
+        "schema": "cwapi.mcp.request.v1",
+        "protocol_version": "cwapi-mcp/1",
+        "request_id": "GPTV160COMMAND001",
+        "project_id": "<PROJECT_ID_FROM_PROJECTS_LIST>",
+        "expected_commit": "<EXACT_40_CHAR_COMMIT>",
+        "method": "mcpServer/tool/call",
+        "params": {
+          "server": "cwapi",
+          "tool": "process_start",
+          "arguments": {
+            "command": "powershell.exe",
+            "argv": ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "Write-Output 'CWAPI_GENERIC_COMMAND_OK'"],
+            "cwd": "."
+          }
+        }
+      }
+    },
+    {
+      "subject": "[CWapi/MCP/1][MCP_REQUEST][GPTV160NAVIGATE001]",
+      "send_count": 1,
+      "body": {
+        "schema": "cwapi.mcp.request.v1",
+        "protocol_version": "cwapi-mcp/1",
+        "request_id": "GPTV160NAVIGATE001",
+        "project_id": "<PROJECT_ID_FROM_PROJECTS_LIST>",
+        "expected_commit": "<EXACT_40_CHAR_COMMIT>",
+        "method": "mcpServer/tool/call",
+        "params": {
+          "server": "playwright",
+          "tool": "browser_navigate",
+          "arguments": {
+            "url": "https://github.com/AAAYNMMM/CWapi"
+          }
+        }
+      }
+    },
+    {
+      "subject": "[CWapi/MCP/1][MCP_REQUEST][GPTV160SCREENSHOT001]",
+      "send_count": 1,
+      "body": {
+        "schema": "cwapi.mcp.request.v1",
+        "protocol_version": "cwapi-mcp/1",
+        "request_id": "GPTV160SCREENSHOT001",
+        "project_id": "<PROJECT_ID_FROM_PROJECTS_LIST>",
+        "expected_commit": "<EXACT_40_CHAR_COMMIT>",
+        "method": "mcpServer/tool/call",
+        "params": {
+          "server": "playwright",
+          "tool": "browser_take_screenshot",
+          "arguments": {
+            "type": "png"
+          }
+        }
+      }
+    },
+    {
+      "subject": "[CWapi/MCP/1][MCP_REQUEST][GPTV160DUPSTATUS001]",
+      "send_count": 2,
+      "body": {
+        "schema": "cwapi.mcp.request.v1",
+        "protocol_version": "cwapi-mcp/1",
+        "request_id": "GPTV160DUPSTATUS001",
+        "method": "mcpServerStatus/list",
+        "params": {}
+      }
+    }
+  ]
+}

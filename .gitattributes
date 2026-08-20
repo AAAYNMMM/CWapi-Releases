@@ -1,0 +1,9 @@
+*.rs text eol=lf
+*.go text eol=lf
+*.ps1 text eol=lf
+*.py text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf
+frontend/wailsjs/go/main/App.d.ts text eol=lf
+frontend/wailsjs/go/main/App.js text eol=lf
+frontend/wailsjs/go/models.ts text eol=lf
