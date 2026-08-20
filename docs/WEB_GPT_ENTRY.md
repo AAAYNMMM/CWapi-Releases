@@ -1,74 +1,136 @@
 # CWapi v1.6.0 Web GPT Entry
 
-这是新会话接手当前项目的最短入口。
+这是 **Web GPT 使用 CWapi v1.6.0 的唯一必读入口**。
 
-## 原则
+目标：先发现当前能力和项目，再对 exact commit 做结构化本机调用。不要预读整套内部文档，也不要沿用 v1.5.1 的 Gmail / Runner / custom Tool 工作流。
 
-```text
-简单
-稳定
-高效
-```
+---
 
-## 当前链路
+## 1. 当前链路
 
 ```text
 Web GPT
- -> GitHub：源码 / exact commit
- -> Slack MCP envelope
- -> CWapi relay
+ -> GitHub：读取 / 修改源码并取得 exact commit
+ -> Slack：发送 CWapi MCP frame
+ -> CWapi：project discovery / exact-commit / state / delivery
  -> stock Codex app-server
  -> configured MCP server
  -> MCP response / Slack File
 ```
 
-GitHub 是源码/commit 事实来源。CWapi 不实现 custom Toolhost/workspace 平台，Codex relay 不启动 model Turn。
+Web GPT 负责决策；CWapi 不规划项目；正常 MCP relay 不启动 Codex model Turn。
 
-## 当前文档读取顺序
+---
 
-1. `PROJECT_PRINCIPLES.md`
-2. `V1_6_0_STAGE_PLAN.md`
-3. `ARCHITECTURE.md`
-4. `SECURITY.md`
-5. `PROTOCOL.md`
-6. `SLACK_TRANSPORT.md`
-7. `CODEX_TOOLHOST.md`
-8. `RUNTIME_PACKAGE.md`
-9. `CHATGPT_WORKFLOW.md`
-10. `DEVELOPMENT.md`
-11. `ACCEPTANCE.md`
+## 2. 新会话先做 discovery
 
-历史路线查 Git history/CHANGELOG。
-
-## Web GPT 只需要提供什么
-
-项目相关调用：
+优先调用：
 
 ```text
-request_id
-project_id
-expected_commit
-method
-params
+mcpServerStatus/list
 ```
 
-其中 `project_id + expected_commit` 必须一起出现。CWapi 自己负责：
+它会返回 stock MCP catalog，并由 CWapi 附加 discovery 信息，包括：
+
+```text
+source_commit
+request_methods
+projects
+project_context
+process_tools
+process_start_modes
+command_path_forms
+```
+
+如果只需要项目列表，可直接调用：
+
+```text
+projects/list
+```
+
+参数必须为空对象：
+
+```json
+{}
+```
+
+不要猜 `project_id`。
+
+---
+
+## 3. Slack frame 必须使用正式格式
+
+正式请求：
+
+```text
++++
+[CWapi/MCP/1][MCP_REQUEST][REQUEST_ID]
+{JSON body}
++++
+```
+
+其中 `REQUEST_ID` 必须和 JSON 中的 `request_id` 一致。
+
+例如 project discovery：
+
+```text
++++
+[CWapi/MCP/1][MCP_REQUEST][GPTCWAPIPROJECTS01]
+{"schema":"cwapi.mcp.request.v1","protocol_version":"cwapi-mcp/1","request_id":"GPTCWAPIPROJECTS01","method":"projects/list","params":{}}
++++
+```
+
+普通频道聊天不是 CWapi request。
+
+---
+
+## 4. 项目调用必须绑定 exact commit
+
+项目相关请求必须同时提供：
+
+```text
+project_id
+expected_commit
+```
+
+`expected_commit` 必须是目标 GitHub repository 的完整 40 位 SHA。
+
+Web GPT 自己负责从 GitHub 确认要验证的 commit；CWapi 负责：
 
 ```text
 project lookup
  -> Git mirror fetch
+ -> verify expected_commit
  -> detached exact-commit worktree
  -> Codex thread/start(cwd + permissions)
- -> stock MCP call
+ -> MCP call
 ```
 
-Web GPT 不需要知道本机 project path、mirror path、worktree path、Codex `threadId`、CODEX_HOME 或 profile ID。
+Web GPT 不需要也不应提供：
 
-纯状态查询 `mcpServerStatus/list` 可以不带项目上下文。
+```text
+本机 project path
+mirror path
+worktree path
+Codex threadId
+CODEX_HOME
+permission profile ID
+_cwapi_workspace
+_cwapi_expected_commit
+_cwapi_request_id
+```
 
-## Remote MCP
+---
 
-只发送：
+## 5. 当前 request method
+
+CWapi discovery method：
+
+```text
+projects/list
+```
+
+stock app-server MCP relay method：
 
 ```text
 mcpServerStatus/list
@@ -76,50 +138,305 @@ mcpServer/resource/read
 mcpServer/tool/call
 ```
 
-不要发送旧 `workspace.open/test.run/automation.run/fs.*` custom Tool 名称。
+不要发送旧版：
 
-通用本地命令通过 configured MCP server `cwapi` 调用：
+```text
+workspace.open
+workspace.status
+workspace.close
+git.rev_parse
+test.run
+build.run
+automation.run
+fs.*
+process.*
+resources.read
+cwapi-dev
+```
+
+注意：`cwapi/process_start` 是 **MCP server/tool**，不是旧式顶层 `process.*` method。
+
+---
+
+## 6. 调用本机进程
+
+当前随包 local MCP server：
+
+```text
+server = cwapi
+```
+
+工具：
+
+```text
+process_start
+process_status
+process_stop
+```
+
+### process_start 示例
+
+人话：
+
+> 在当前项目 exact commit 的工作区中，用指定 Python 启动 `server.py`。
 
 ```json
 {
   "server": "cwapi",
   "tool": "process_start",
   "arguments": {
-    "command": "powershell.exe",
-    "argv": ["-NoProfile", "-NonInteractive", "-Command", "<command>"],
-    "cwd": "."
+    "command": "C:/Users/name/AppData/Local/Programs/Python/Python312/python.exe",
+    "argv": ["server.py"]
   }
 }
 ```
 
-随后用 `process_status(process_id)` 查询，必要时用 `process_stop(process_id)` 停止。Web GPT 自己选择安装器、语言版本和安装位置；CWapi 不解释或管理。不得把 secret 放入 command/argv。
+这个对象放进外层：
 
-`command` 可写 PATH 名称、绝对路径或 `cwd` 相对路径，例如 `C:/Users/name/AppData/Local/Programs/Python/Python312/python.exe`、`.venv/Scripts/python.exe`、`node_modules/.bin/tool.cmd`。Windows 路径进入 MCP JSON 前必须把 `\` 全部转换为 `/`；正式请求不使用 `C:\\...`。不要在字符串内部再包引号。native executable 保持结构化 argv；`.cmd/.bat` 必然按 Windows command-script 语义执行。
+```text
+method = mcpServer/tool/call
+params = 上面的对象
+```
 
-## 文件 / 图片 / 日志
+如果返回：
 
-如果 MCP 已经合法返回内容，CWapi 才考虑外发：
+```text
+state = running
+process_id = proc-...
+```
 
-- 短文本直接进入 MCP response；
-- 长文本/日志、图片、resource text/blob 转 Slack File；
-- 单个文件最大 8 MiB；
-- 单次 response 最多 16 个文件；
-- 只上传 MCP 已返回的内容，不根据本地 path/URI 自己额外读取文件；
-- 超限明确失败，不截断，也不重新调用可能有副作用的 MCP tool。
+后续查询同一个进程，不重复启动。
 
-因此“能读本地文件”和“能把文件传到 Slack”不是同一个权限。
+---
 
-## Permissions
+## 7. 环境由 Web GPT 管理
 
-- 默认 safe -> `cwapi-safe`；
-- 显式 full_access -> `cwapi-full-access`；
-- Codex-managed 基础层不约束 packaged command MCP；通用命令以当前 Windows 用户权限运行；
-- 权限绑定 Codex context，不由 Slack parser 判断具体指令。
+CWapi 不决定目标项目应该使用哪个 Python / JDK / SDK / Node / Go / Rust 版本。
 
-## 等待
+正常策略：
 
-同一外部任务单轮累计等待最多 **3 分钟**。到上限仍在运行就停止本轮等待，报告 task/request id、exact commit 与最后状态；下一轮查询原任务，不重复提交。停止等待不等于 cancel。
+```text
+检查本机已有环境
+   ↓
+确认项目要求
+   ↓
+找到合适 executable → 直接使用
+   ↓
+没有 → 选择安装方式和持久位置
+   ↓
+再把准确 command + argv 交给 CWapi
+```
 
-## 完成定义
+优先使用准确 executable，例如：
 
-v1.6.0 已完成实现和用户验收；收口证据见 `V1_6_0_STAGE_PLAN.md`、`ACCEPTANCE.md`、`RELEASE_CHECKLIST.md`。后续任何代码变化重新适用 same-commit Gate，不能沿用 v1.6.0 候选证据。
+```text
+C:/Users/name/AppData/Local/Programs/Python/Python312/python.exe
+C:/Program Files/Java/jdk-25/bin/java.exe
+C:/Program Files/Git/cmd/git.exe
+D:/SDK/tool.exe
+.venv/Scripts/python.exe
+node_modules/.bin/tool.cmd
+```
+
+`process_start.command` 支持：
+
+```text
+PATH executable name
+absolute executable path
+working-directory-relative executable path
+```
+
+native executable 的 argv 直接传入；`.cmd/.bat` 使用 Windows command-script 语义。
+
+---
+
+## 8. Windows 路径规则
+
+进入 MCP JSON 前，统一把 Windows `\` 转为 `/`：
+
+```text
+C:/Projects/example/.venv/Scripts/python.exe
+D:/SDK/jdk/bin/java.exe
+//server/share/tool.exe
+```
+
+正式工作流不要发送：
+
+```text
+C:\\Projects\\...
+```
+
+也不要给 `command` 值额外套一层引号。
+
+这是为了避免 JSON + Slack 文本的反斜杠转义问题。
+
+---
+
+## 9. exact-commit worktree 是临时上下文
+
+CWapi 在项目调用中准备 detached exact-commit worktree，并在调用与附件处理完成后释放。
+
+因此不要假定：
+
+```text
+请求 A 在 workspace 创建 .venv
+```
+
+之后：
+
+```text
+请求 B 一定还能看到同一个 .venv
+```
+
+需要跨请求长期复用的环境，更适合放在明确持久位置，并通过绝对 executable 路径调用；或者按项目需要重新创建。
+
+---
+
+## 10. Playwright
+
+浏览器能力通过 configured Playwright MCP 调用。
+
+典型流程：
+
+```text
+process_start 本地服务
+ -> browser_navigate localhost
+ -> fill / click
+ -> browser_evaluate 验证真实结果
+ -> browser_take_screenshot
+ -> process_stop
+```
+
+不要把“页面能打开”当成业务功能已经通过。需要继续读取实际 DOM / 状态 / 输出。
+
+例如：
+
+```js
+() => ({
+  result: document.querySelector('#result')?.textContent,
+  status: document.querySelector('#status')?.textContent,
+  title: document.title
+})
+```
+
+---
+
+## 11. 文件 / 图片 / 日志外发
+
+文件读取权限和 Slack 外发权限是两层：
+
+```text
+MCP 是否取得内容
+ -> MCP 已返回 text/blob/image
+ -> CWapi outbound policy
+ -> Slack message / Slack File
+```
+
+当前规则：
+
+- 短文本 inline；
+- 长文本/日志、image、resource text/blob 使用 Slack File；
+- 单个 artifact 最大 8 MiB；
+- 单次 response 最多 16 个 artifact；
+- 超限明确失败，不静默截断；
+- CWapi 不根据 result 中出现的 path/URI 自己额外读取本地文件；
+- delivery 失败不自动 replay 有副作用的 tool。
+
+Slack file 引用写入 `MCP_RESPONSE.resources`，包含 media type、SHA-256、size。
+
+---
+
+## 12. 权限边界
+
+Codex-managed execution：
+
+```text
+safe        -> cwapi-safe
+full_access -> cwapi-full-access
+```
+
+但是 packaged `cwapi` command/process MCP 启动的自由 executable 以当前 Windows 用户权限运行，**不自动继承 Codex thread profile 的 filesystem / execpolicy sandbox**。
+
+因此：
+
+- 只对用户明确配置的项目使用自由 command 能力；
+- 不把 token / password / private key 放进 command / argv；
+- 需要认证时优先使用本机已经配置的凭据机制；
+- 不把 `safe` 误解为“任意子进程都只能写项目目录”。
+
+---
+
+## 13. Duplicate 与副作用
+
+- 同 request ID + 同 fingerprint 不执行第二次；
+- fingerprint 包含 `project_id + expected_commit + method + canonical params`；
+- 同 request ID + 不同 fingerprint -> conflict；
+- terminal duplicate 可返回当前会话已有 compact response / Slack file 引用；
+- ambiguous side-effect MCP call 不自动 replay。
+
+如果一个 process 已经返回：
+
+```text
+process_id = proc-...
+```
+
+后续查原 process，不重新提交 `process_start`。
+
+---
+
+## 14. 等待预算
+
+对**同一个外部任务或等待目标**，单次回复累计最多等待：
+
+```text
+3 分钟
+```
+
+规则：
+
+- 第一次 sleep / poll / status query 开始累计；
+- 短轮询不会重置预算；
+- 3 分钟仍无 terminal result，立即停止本轮等待；
+- 报告 request/task/process ID、exact commit、最后状态；
+- 本地任务可以继续运行；
+- 下一轮只查询原任务；
+- 不重复提交；
+- 停止等待不等于 cancel；
+- 无 terminal 证据不宣布成功。
+
+---
+
+## 15. 常见错误的处理方向
+
+```text
+MCP_PROCESS_CONTEXT_REQUIRED
+ -> 补真实 project_id + exact expected_commit
+
+MCP_PROJECT_CONTEXT_INCOMPLETE
+ -> project_id / expected_commit 必须成对
+
+PROCESS_COMMAND_NOT_FOUND
+ -> 重新发现 executable / 检查绝对或相对路径
+
+PROCESS_START_FAILED
+ -> 看 command_path / stderr / 系统启动错误
+
+ERR_CONNECTION_REFUSED
+ -> 检查服务是否 running、端口是否正确；stop 后出现则通常正常
+```
+
+详细排障见 [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md)。
+
+---
+
+## 16. 完整工作流参考
+
+正常使用读到这里已经够了。
+
+只有需要更多细节时再继续：
+
+- [`CHATGPT_WORKFLOW.md`](CHATGPT_WORKFLOW.md)：完整开发与环境管理流程；
+- [`PROTOCOL.md`](PROTOCOL.md)：Slack MCP envelope / response；
+- [`SECURITY.md`](SECURITY.md)：权限与 trusted command boundary；
+- [`SLACK_TRANSPORT.md`](SLACK_TRANSPORT.md)：transport / delivery；
+- [`OPERATIONS.md`](OPERATIONS.md)：运行与维护。
