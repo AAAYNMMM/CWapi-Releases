@@ -29,7 +29,7 @@ Windows 11 x64 不需要另外安装 Codex、Git、Node、Playwright MCP 或 Chr
    └─ browser/
 ```
 
-CWapi 不依赖当前工作目录，也不保存构建机绝对路径。运行时路径全部从 `CWapi.exe` 所在目录解析。
+CWapi 不依赖当前工作目录；`CWapi.exe` 不保存本机构建用户名、发行仓库路径或用户目录。运行时路径全部从 executable 所在目录解析。
 
 首次运行后，用户数据只写入：
 
@@ -103,7 +103,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File automation/validate_v160_por
   -ExpectedCommit $commit
 ```
 
-发行构建启用 Wails/Go `-trimpath`，staging 会移除 runtime 临时日志，并拒绝用户数据、数据库、浏览器 profile 和凭据类文件。最终 gate 会把 ZIP 解压到不同盘符、含空格和中文的临时目录，从无关工作目录启动真实 GUI，并验证 runtime 版本与数据落点。
+发行构建启用 Wails/Go `-trimpath`，staging 会移除 runtime 临时日志，并拒绝用户数据、数据库、浏览器 profile 和凭据类文件。随包第三方预编译 runtime 可能保留其公开 CI 构建 provenance，但不得包含本次打包用户的身份、路径或 secret。最终 gate 会把 ZIP 解压到不同盘符、含空格和中文的临时目录，从无关工作目录启动真实 GUI，并验证 runtime 版本与数据落点。
 
 ## 文档
 

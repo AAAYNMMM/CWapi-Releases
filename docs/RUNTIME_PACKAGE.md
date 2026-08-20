@@ -16,7 +16,7 @@ v1.6.0 面向 Windows 11 x64 提供自包含便携 ZIP。最终 artifact 不进�
    └─ browser/
 ```
 
-安装根始终是运行中的 `CWapi.exe` 所在目录，不读取构建机路径，也不依赖 process working directory。用户关闭程序后可以移动整个目录。
+安装根始终是运行中的 `CWapi.exe` 所在目录，不读取本次发行构建路径，也不依赖 process working directory。用户关闭程序后可以移动整个目录。
 
 首次运行创建：
 
@@ -87,10 +87,12 @@ generated Codex config 在需要 MCP context 时按当前安装根重写，不�
 - 用户 config、state、task、result、log；
 - project path、project ID 或 channel ID；
 - browser profile、Cookies、History、Login Data；
-- 构建机用户名、用户目录或源码绝对路径；
+- 本次打包用户的用户名、用户目录、项目路径或发行仓库绝对路径；
 - runtime 调试日志或验证临时文件。
 
 Git 自带的 `cert.pem` 是公共 CA bundle，不属于用户证书或私钥。
+
+固定的第三方预编译 runtime 允许保留其公开构建 provenance，例如通用 CI runner 名称、编译器源码映射或帮助文本中的示例路径；这些内容不是 CWapi 用户数据。privacy gate 仍必须证明当前打包操作员的身份与路径、项目上下文及任何真实凭据均未进入 ZIP。
 
 ## Relocation gate
 

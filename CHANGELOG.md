@@ -27,7 +27,7 @@ Web GPT
 - 随包提供 pinned Codex、MinGit、Node、Playwright MCP 与 Chromium；
 - 所有 runtime 路径从 `CWapi.exe` 所在目录动态解析；
 - 可从不同盘符、含空格或非 ASCII 字符的目录启动；
-- Go/Wails 构建启用 `-trimpath`，不嵌入构建机用户目录或源码绝对路径；
+- `CWapi.exe` 的 Go/Wails 构建启用 `-trimpath`，不嵌入本机构建用户目录或发行仓库绝对路径；
 - staging 删除 `.log/.tmp/.dmp/.trace` 等运行残留；
 - ZIP 不包含 `CWapi-data`、token、配置、数据库、任务、日志或浏览器 profile；
 - release gate 从与安装目录无关的 working directory 启动真实 GUI 并验证数据只写入 executable 相邻的 `CWapi-data`。
