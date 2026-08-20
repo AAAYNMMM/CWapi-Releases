@@ -41,22 +41,27 @@ function Stop-OwnedProcess {
 
 function Remove-TreeWithRetry {
     param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][string]$AllowedRoot)
-    if (-not (Test-Path -LiteralPath $Path)) { return }
     $ResolvedRoot = [System.IO.Path]::GetFullPath($AllowedRoot).TrimEnd('\')
     $ResolvedPath = [System.IO.Path]::GetFullPath($Path).TrimEnd('\')
     if ($ResolvedPath.Equals($ResolvedRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
         -not $ResolvedPath.StartsWith($ResolvedRoot + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "CWAPI_PORTABLE_RELOCATION_CLEANUP_PATH_INVALID path=$ResolvedPath root=$ResolvedRoot"
     }
+    $NativePath = if ($ResolvedPath.StartsWith('\\')) {
+        '\\?\UNC\' + $ResolvedPath.TrimStart('\')
+    } else {
+        '\\?\' + $ResolvedPath
+    }
+    if (-not [System.IO.Directory]::Exists($NativePath)) { return }
     $LastError = $null
     for ($Attempt = 1; $Attempt -le 20; $Attempt++) {
         try {
-            Remove-Item -LiteralPath $ResolvedPath -Recurse -Force -ErrorAction Stop
-            return
+            [System.IO.Directory]::Delete($NativePath, $true)
+            if (-not [System.IO.Directory]::Exists($NativePath)) { return }
         } catch {
             $LastError = $_
-            Start-Sleep -Milliseconds 250
         }
+        Start-Sleep -Milliseconds 250
     }
     throw "CWAPI_PORTABLE_RELOCATION_CLEANUP_FAILED path=$ResolvedPath error=$($LastError.Exception.Message)"
 }
@@ -64,7 +69,7 @@ function Remove-TreeWithRetry {
 function Assert-BinaryOmitsBuildIdentity {
     param([Parameter(Mandatory = $true)][string]$Path)
     $Bytes = [System.IO.File]::ReadAllBytes($Path)
-    $Text = [System.Text.Encoding]::Latin1.GetString($Bytes)
+    $Text = [System.Text.Encoding]::GetEncoding(28591).GetString($Bytes)
     $Candidates = @($RepoRoot, $RepoRoot.Replace('\', '/'))
     if ($env:USERPROFILE) {
         $Candidates += $env:USERPROFILE
@@ -106,7 +111,9 @@ $HadProbeConfig = Test-Path Env:CWAPI_GUI_PROBE_CONFIG
 $PreviousProbeConfig = if ($HadProbeConfig) { $env:CWAPI_GUI_PROBE_CONFIG } else { $null }
 $Result = $null
 try {
-    Expand-Archive -LiteralPath $ZipPath -DestinationPath $InstallRoot -Force
+    & tar.exe -xf $ZipPath -C $InstallRoot
+    if ($LASTEXITCODE -ne 0) { throw "CWAPI_PORTABLE_RELOCATION_EXTRACT_FAILED exit=$LASTEXITCODE" }
+    $global:LASTEXITCODE = 0
     $Executable = Join-Path $InstallRoot 'CWapi.exe'
     $ManifestPath = Join-Path $InstallRoot 'portable-manifest.json'
     if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) { throw 'CWAPI_PORTABLE_RELOCATION_EXE_MISSING' }
@@ -191,7 +198,7 @@ try {
         if (-not $ResolvedProbeBase.StartsWith($TemporaryRoot + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
             throw "CWAPI_PORTABLE_RELOCATION_BASE_CLEANUP_PATH_INVALID path=$ResolvedProbeBase root=$TemporaryRoot"
         }
-        [System.IO.Directory]::Delete($ResolvedProbeBase, $false)
+        [System.IO.Directory]::Delete(('\\?\' + $ResolvedProbeBase), $false)
     }
 }
 
