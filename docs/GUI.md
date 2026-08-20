@@ -1,338 +1,217 @@
 # CWapi v1.6.0 GUI
 
+这份文档只解释 **CWapi Desktop 每个页面是做什么的**。Slack App 创建见 [`SLACK_SETUP.md`](SLACK_SETUP.md)，权限实现见 [`SECURITY.md`](SECURITY.md)，运行恢复见 [`OPERATIONS.md`](OPERATIONS.md)。
+
 CWapi Desktop 使用 Wails v2 + React + TypeScript。
-
-GUI 的目标不是把 backend state machine 全部搬到屏幕上，而是让普通用户能回答几件最重要的事：
-
-```text
-CWapi 现在正常吗？
-Slack 连上了吗？
-项目配对了吗？
-我现在是什么权限模式？
-Codex / MCP 能用吗？
-刚才的请求发生了什么？
-出错应该去哪里看？
-```
-
----
 
 ## 1. 页面总览
 
 当前主要页面：
 
-- 控制台；
-- 项目；
-- 设置；
-- 诊断；
-- 关于。
-
-如果你是第一次使用，推荐顺序：
-
 ```text
+控制台
+项目
 设置
- -> 项目
- -> 控制台
- -> 诊断（有问题时）
+诊断
+关于
 ```
 
----
+第一次使用推荐顺序：
+
+```text
+设置 Slack
+→ 添加项目
+→ 保持 safe 权限
+→ 回控制台确认状态
+→ 有问题再看诊断
+```
 
 ## 2. 控制台
 
-普通用户可以把控制台理解成“CWapi 当前工作状态”。
-
-主要关注：
-
-- Slack 状态；
-- stock Codex runtime / app-server 状态；
-- MCP relay 状态；
-- 最近 MCP request 的 method / status / elapsed / delivery；
-- structured execution log；
-- CWapi runtime log。
-
-### 怎么判断基本可用
-
-至少应确认：
+控制台用来回答：
 
 ```text
-Slack 已连接
-Codex runtime 可用
-MCP relay ready
-没有持续刷新的 fatal error
+CWapi 现在正常吗？
+Slack 连上了吗？
+Codex / MCP ready 吗？
+刚才 request 成功还是失败？
 ```
 
-### 最近请求
+主要状态包括：
 
-最近请求不是“完整项目历史管理器”。
+- CWapi Desktop；
+- Go Core / MCP Relay；
+- Slack Transport；
+- Codex app-server / MCP Relay；
+- CWapi process MCP。
 
-它主要用于回答：
+下面两块日志分别是：
 
 ```text
-这个 request 收到了吗？
-运行多久？
-completed / failed / unavailable？
-是否有 Slack delivery？
+结构化执行日志
+CWapi 运行日志
 ```
 
-大日志仍按需查看，不应默认整份塞进 GUI 或 Slack。
+结构化执行日志更适合看某个 request / tool 的状态和耗时；运行日志更适合看 Slack、Codex、MCP 和 runtime 自己的错误。
 
----
+日志是诊断面，不是完整项目历史数据库；大日志按需看。
 
 ## 3. 项目页面
 
-项目页维护：
+点击：
 
 ```text
-display name
-GitHub repository identity
-本地项目路径
-remote URL
+＋ 添加项目
 ```
 
-CWapi 会为项目维护内部：
+当前表单主要填写：
 
 ```text
-project_id = prj-...
+项目名称
+本地路径
+Git 地址
 ```
 
-Web GPT 正常通过 discovery / `projects/list` 取得项目 ID，不需要用户手工复制到每次请求里。
+保存后项目卡片会显示：
 
-### 本地项目路径的作用
+```text
+项目 ID
+本地路径
+Git 地址
+```
 
-已配置本地路径同时是 `cwapi-safe` Codex profile 的 workspace root 之一。
+`project_id = prj-...` 由 CWapi 维护。正常 Web GPT 会通过 `projects/list` / discovery 自动取得，不要求用户每次手抄。
 
-但是项目执行时真正用于 exact-commit 的工作目录由 CWapi 自己准备 detached worktree，不要求 Web GPT 知道那个路径。
-
-### 修改项目后需要重启吗
-
-通常不需要。
-
-项目或权限 fingerprint 变化后，后续 MCP 调用会建立新的必要 context。
-
----
+项目执行时 CWapi 会另外准备 exact-commit worktree；GUI 里填写的本地项目路径不是要求 Web GPT 直接操作的临时 worktree 路径。
 
 ## 4. 设置页面
 
-设置页主要维护用户需要明确决定的运行配置。
+设置页目前主要有三类内容。
+
+### 界面
+
+可以调整：
+
+```text
+日志字号
+自动滚动到最新日志
+```
+
+### 权限
+
+当前两个模式：
+
+```text
+安全权限 / safe
+完全访问权限 / full_access
+```
+
+第一次使用保持 `safe` 即可。
+
+这里切换的是 **Codex-managed execution** 的默认权限 profile。自由 command/process MCP 的真实边界不同，完整说明见 [`SECURITY.md`](SECURITY.md)。
 
 ### Slack
 
-当前 Slack transport 使用：
+显示当前：
+
+```text
+Workspace
+控制频道名称
+Channel ID
+Credential Store
+```
+
+点击：
+
+```text
+更换 Slack 配置
+```
+
+会出现：
 
 ```text
 App Token
 Bot Token
 Channel ID
+验证并保存
 ```
 
-Token 保存在 Windows Credential Manager，不写入普通配置。
+第一次不知道这些值从哪里来，不要在 GUI 文档里猜，直接按 [`SLACK_SETUP.md`](SLACK_SETUP.md) 配置。
 
-用户主要需要确认：
+验证成功后 token 存 Windows Credential Manager，不显示明文保存值。
 
-- token 对应正确 Workspace；
-- Channel ID 正确；
-- Slack 状态连接成功。
+## 5. 诊断页面
 
-### 权限模式
+这是出问题时优先看的页面。
 
-当前两个主要选择：
+主要检查：
 
-```text
-safe
-full_access
-```
-
-默认推荐 `safe`。
-
----
-
-## 5. 安全权限 `safe`
-
-默认模式。
-
-CWapi 为 Codex-managed execution 使用：
-
-```text
-cwapi-safe
-```
-
-主要效果：
-
-- 已配置项目作为 managed workspace root；
-- CWapi data root 作为 managed workspace root；
-- Codex thread 使用对应权限 profile；
-- 基础 rules 继续生效。
-
-普通用户如果不知道该选哪个，就保持 `safe`。
-
----
-
-## 6. 完全访问权限 `full_access`
-
-用户显式开启。
-
-CWapi 为 Codex-managed execution 使用：
-
-```text
-cwapi-full-access
-```
-
-它扩大 Codex-managed filesystem permission，但并不等于：
-
-```text
-关闭所有保护
-```
-
-CWapi 仍保留自己的 secret、幂等、owned process、delivery 等边界，也不使用裸 `:danger-full-access` 作为默认实现。
-
-完整安全说明见 [`SECURITY.md`](SECURITY.md)。
-
----
-
-## 7. command/process MCP 与权限模式的区别
-
-这个区别必须在 GUI 使用说明里讲清楚。
-
-随包 `cwapi` MCP server 的：
-
-```text
-process_start
-process_status
-process_stop
-```
-
-可以启动用户明确允许的自由 executable。
-
-这些子进程以当前 Windows 用户权限运行，**不自动继承 Codex thread 的 `cwapi-safe` / `cwapi-full-access` filesystem / execpolicy sandbox**。
-
-所以 GUI 的“安全权限”不能理解成：
-
-> 所有从 CWapi 启动的任意程序都被困在项目目录。
-
-这是两层不同的执行边界。
-
----
-
-## 8. 诊断页面
-
-诊断页是出问题时最应该先看的页面。
-
-建议至少展示 / 检查：
-
-- CWapi version；
-- source commit；
+- CWapi version / source commit；
 - Slack state；
-- Codex executable；
-- Codex version / SHA；
-- app-server readiness；
-- MCP relay readiness；
-- active / terminal MCP requests；
+- Codex executable / version / SHA；
+- app-server / MCP readiness；
 - permission mode；
-- 最近错误。
+- 活动错误。
 
-### 常见使用方式
-
-如果 Web GPT 说：
+常见顺序：
 
 ```text
-CWapi 没有回复
+Slack 没回复
+→ 先看 Slack state
+
+MCP 调不动
+→ 看 Codex / MCP readiness
+
+项目 request 失败
+→ 看项目配置 + 活动错误
 ```
-
-先看 Slack state。
-
-如果：
-
-```text
-mcpServerStatus/list 失败
-```
-
-看 Codex executable / app-server / MCP readiness。
-
-如果：
-
-```text
-项目调用失败
-```
-
-再检查项目配置、permission mode 和最近结构化错误。
 
 然后根据错误码去 [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md)。
 
----
+## 6. 关于页面
 
-## 9. 关于页面
-
-关于页面主要用于确认：
+用于确认：
 
 ```text
-当前 CWapi 版本
-发行信息
-source commit / build 信息
+CWapi 版本
+source commit
+运行平台
+Stock Codex 版本
 ```
 
-排障和报告问题时，版本号和 source commit 比“我下载的是最新那个 ZIP”更可靠。
+报告问题时，`version + source commit` 比“我下载了最新 ZIP”可靠得多。
 
----
+## 7. 关于 Cancel / Stop
 
-## 10. Cancel
+当前 stock MCP relay 没有一个可以安全映射为“任意 in-flight tool 已真正取消”的 request-scoped cancel contract，因此 GUI 不应靠改状态伪装取消成功。
 
-只有存在真实 backend cancellation contract 时，GUI 才应该显示“可取消”。
-
-当前 stock MCP tool relay 对 in-flight tool call 没有安全的 request-scoped cancel hook，因此不能用：
-
-```text
-GUI 状态改成 cancelled
-```
-
-冒充：
-
-```text
-本机执行真的已经停止
-```
-
-对于随包 process server 自己启动并记录的长期进程，应使用真实：
+如果是 `cwapi/process_start` 启动并记录的长期进程，真正停止它使用：
 
 ```text
 process_stop(process_id)
 ```
 
-处理。
+## 8. GUI 不代表旧架构
 
----
-
-## 11. GUI 不应该再展示的旧架构
-
-不要把这些旧 custom Toolhost / Runner 概念当成 v1.6.0 当前能力：
-
-```text
-managed workspace platform
-workspace.open
-custom test.run
-custom build.run
-automation.run
-旧 Runner task UI
-```
-
-当前架构是：
+v1.6.0 当前核心是：
 
 ```text
 Slack MCP relay
-exact commit
-stock Codex app-server
-configured MCP server
+→ exact commit
+→ stock Codex app-server
+→ configured MCP server
 ```
 
----
+旧版 Runner、custom Toolhost、`workspace.open`、`test.run`、`build.run`、`automation.run` 等不要从历史截图或旧文档里当成当前 GUI 能力。
 
-## 12. Efficiency
+## 9. GUI 设计原则
 
-GUI 自己也应保持轻量：
+GUI 只展示用户真正需要的状态，不复制 backend state machine：
 
 - background refresh 节流；
 - 日志有界；
-- 不默认加载大 resource；
 - readiness 查询不启动模型 Turn；
-- 不因为 UI 刷新反复重建 app-server / context；
-- 大日志与 artifact 按请求需要展开。
+- 不默认加载大 resource；
+- 不因为 UI 刷新反复重建 app-server / context。
 
-GUI 的工作是让状态清楚，不是靠持续刷新把 CPU 和日志都变成装饰灯。
+需要使用步骤看 [`USER_GUIDE.md`](USER_GUIDE.md)，不要让 GUI 文档再次长成第二份用户手册。
