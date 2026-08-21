@@ -1,20 +1,88 @@
-# CWapi v1.6.0
+<div align="center">
 
-CWapi 是面向个人 Windows 开发环境的 **Web GPT → Slack → 本机开发工具** 桥接程序。
+# CWapi
+
+**Turn ChatGPT Web into a local coding agent — without a real MCP connection or Codex Agent quota.**
+
+**让网页 ChatGPT 连接本地 Windows 开发环境，无需真正的 MCP 链路，也不消耗 Codex Agent 配额。**
+
+[![ChatGPT](https://img.shields.io/badge/ChatGPT-Plus%20%7C%20Pro-10a37f?style=flat-square)](https://chatgpt.com/)
+![MCP](https://img.shields.io/badge/MCP-Not%20Required-6f42c1?style=flat-square)
+![Codex Agent](https://img.shields.io/badge/Codex%20Agent%20Quota-Not%20Used-success?style=flat-square)
+![Platform](https://img.shields.io/badge/Platform-Windows%2011-0078d4?style=flat-square)
+![Install](https://img.shields.io/badge/Install-Portable-orange?style=flat-square)
+[![Release](https://img.shields.io/github/v/release/AAAYNMMM/CWapi-Releases?style=flat-square&label=Release)](https://github.com/AAAYNMMM/CWapi-Releases/releases)
+
+[5 分钟开始](#5-分钟开始) · [为什么使用 CWapi](#为什么使用-cwapi) · [工作原理](#工作原理) · [主要能力](#v160-主要能力) · [用户指南](docs/USER_GUIDE.md) · [故障排除](docs/TROUBLESHOOTING.md)
+
+</div>
+
+---
+
+CWapi 是面向个人 Windows 开发环境的 **Web GPT → Slack → 本机开发工具** 桥接程序，主要面向 **ChatGPT Plus 和 Pro 用户**。
+
+它不要求在 ChatGPT Web 与本机之间建立真正的 MCP 连接，也不通过 Codex Agent Turn 替 Web GPT 思考。Web GPT 仍然负责理解需求、读写 GitHub、决定修改方式和测试方案；CWapi 负责把结构化请求送到本机，并在正确项目、正确 Git commit 上执行开发工具，再把状态和结果回传给 Web GPT。
+
+## 为什么使用 CWapi
+
+| | 普通 ChatGPT Web | **CWapi** |
+|---|---|---|
+| 使用 ChatGPT 网页聊天 | ✅ | ✅ |
+| 面向 Plus / Pro 用户 | ✅ | ✅ |
+| 需要真正的 MCP 链路 | ❌ | **❌** |
+| 调用本机开发工具 | ❌ | **✅** |
+| 本机构建 / 测试 / 进程执行 | ❌ | **✅** |
+| localhost 浏览器 E2E | ❌ | **✅** |
+| 绑定 exact Git commit 执行 | ❌ | **✅** |
+| 使用 Codex Agent Turn | ❌ | **❌** |
+| 消耗 Codex Agent 配额 | ❌ | **❌** |
+
+CWapi 的重点不是重新实现一套 Git、Build、Test 或模型平台，而是让普通 Web GPT 会话能够安全、可验证地调用本机已有的开发能力。
+
+## 工作原理
 
 ```text
-Web GPT：理解需求、读写 GitHub、决定怎么测试
-        ↓ Slack MCP request
-CWapi：项目发现、exact commit、本机执行、状态、结果回传
-        ↓
-stock Codex app-server → configured MCP server
-        ↓
-MCP response / Slack File
+┌──────────────────────────┐
+│       ChatGPT Web        │
+│       Plus / Pro         │
+│ 需求 / GitHub / 测试决策 │
+└────────────┬─────────────┘
+             │
+             │ GitHub + Slack
+             ▼
+┌──────────────────────────┐
+│          Slack           │
+│   MCP-style messages     │
+│      (not real MCP)      │
+└────────────┬─────────────┘
+             │
+             ▼
+┌──────────────────────────┐
+│          CWapi           │
+│ 项目发现 / exact commit  │
+│ 本机执行 / 状态 / 安全边界│
+└────────────┬─────────────┘
+             │
+             ▼
+┌──────────────────────────┐
+│ Local Windows Dev Tools  │
+│ Build / Test / Browser   │
+│ Codex app-server / MCP   │
+└────────────┬─────────────┘
+             │
+             ▼
+       Slack response / File
+             │
+             └──────────────► ChatGPT Web
 ```
 
-**本项目的mcp是模拟mcp格式，并非真正的mcp链路**   
-**The MCP used in this project **simulates the MCP format** and is **not an actual MCP connection or communication pipeline**.**   
+### 关于 MCP
 
+**CWapi 使用 MCP 风格的消息格式来组织结构化 request / response，但 ChatGPT Web 与本机之间并没有建立真正的 MCP 连接。**
+
+**CWapi uses MCP-style message formats for structured requests and responses, but it does not establish a real MCP connection between ChatGPT Web and the local machine.**
+
+这里的 MCP frame 是通信格式的一部分，而不是 ChatGPT → MCP Server 的实际传输链路。CWapi 通过 Slack 传递这些结构化消息，因此项目本身不要求用户拥有或配置一条直接连接本机的 MCP 链路。
 
 CWapi 不运行模型，也不启动 Codex Agent Turn 替 Web GPT 思考。v1.6.0 的核心目标是让 Web GPT 在**正确项目、正确 Git commit**上调用本机开发能力，而不是重新实现第二套 Git / Build / Test 平台。
 
@@ -39,7 +107,7 @@ CWapi 不运行模型，也不启动 Codex Agent Turn 替 Web GPT 思考。v1.6.
 
 ## v1.6.0 主要能力
 
-- Slack MCP request / response 与 Slack File 回传；
+- Slack MCP-style request / response 与 Slack File 回传；
 - `projects/list` / `mcpServerStatus/list` discovery；
 - `project_id + expected_commit` exact-commit 执行；
 - stock Codex app-server MCP relay；
