@@ -12,6 +12,10 @@ stock Codex app-server → configured MCP server
 MCP response / Slack File
 ```
 
+**本项目的mcp是模拟mcp格式，并非真正的mcp链路**   
+**The MCP used in this project **simulates the MCP format** and is **not an actual MCP connection or communication pipeline**.**   
+
+
 CWapi 不运行模型，也不启动 Codex Agent Turn 替 Web GPT 思考。v1.6.0 的核心目标是让 Web GPT 在**正确项目、正确 Git commit**上调用本机开发能力，而不是重新实现第二套 Git / Build / Test 平台。
 
 使用中有任何问题，可加入“小黑盒群”，链接在帖子置顶评论。
