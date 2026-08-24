@@ -1,6 +1,10 @@
 package app
 
-import "github.com/AAAYNMMM/CWapi/internal/config"
+import (
+	"errors"
+
+	"github.com/AAAYNMMM/CWapi/internal/config"
+)
 
 func (s *Service) UpdatePermissionMode(mode string) (ConfigSnapshot, error) {
 	canonical, err := config.CanonicalPermissionMode(mode)
@@ -8,10 +12,12 @@ func (s *Service) UpdatePermissionMode(mode string) (ConfigSnapshot, error) {
 		s.recordOperationalError("permissions", "permissions.update", err)
 		return s.ConfigSnapshot(), err
 	}
-	cfg, err := s.config.Update(func(candidate *config.Config) error {
-		candidate.PermissionMode = canonical
-		return nil
-	})
+	if s.processRuntime == nil {
+		err = errors.New("PERMISSION_RUNTIME_UNAVAILABLE")
+		s.recordOperationalError("permissions", "permissions.update", err)
+		return s.ConfigSnapshot(), err
+	}
+	cfg, err := s.processRuntime.UpdatePermissionMode(canonical)
 	if err != nil {
 		s.recordOperationalError("permissions", "permissions.update", err)
 		return s.ConfigSnapshot(), err

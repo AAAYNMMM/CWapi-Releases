@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"runtime"
 
@@ -10,7 +11,7 @@ import (
 	"github.com/AAAYNMMM/CWapi/internal/config"
 	"github.com/AAAYNMMM/CWapi/internal/gateway"
 	"github.com/AAAYNMMM/CWapi/internal/observability"
-	"github.com/AAAYNMMM/CWapi/internal/projects"
+	"github.com/AAAYNMMM/CWapi/internal/processruntime"
 	"github.com/AAAYNMMM/CWapi/internal/state"
 )
 
@@ -25,13 +26,14 @@ type RuntimeSnapshot struct {
 }
 
 type Service struct {
-	config        *config.Manager
-	projects      *projects.Registry
-	state         *state.Store
-	observability *observability.Hub
-	gateway       *gateway.Gateway
-	slack         *slackRuntime
-	codexHost     *codex.MCPHost
+	config          *config.Manager
+	state           *state.Store
+	observability   *observability.Hub
+	gateway         *gateway.Gateway
+	slack           *slackRuntime
+	codexHost       *codex.MCPHost
+	processRuntime  *processruntime.Runtime
+	contextResolver *mcpContextResolver
 }
 
 func NewService() (*Service, error) {
@@ -55,6 +57,14 @@ func NewServiceWithPaths(configPath, statePath string) (*Service, error) {
 	manager, err := config.Open(configPath)
 	if err != nil {
 		return nil, err
+	}
+	if manager.Snapshot().PermissionMode != config.PermissionModeSafe {
+		if _, err := manager.Update(func(candidate *config.Config) error {
+			candidate.PermissionMode = config.PermissionModeSafe
+			return nil
+		}); err != nil {
+			return nil, fmt.Errorf("CONFIG_STARTUP_SAFE_FAILED: %w", err)
+		}
 	}
 	stateStore, err := state.Open(statePath)
 	if err != nil {
@@ -82,44 +92,53 @@ func NewServiceWithPaths(configPath, statePath string) (*Service, error) {
 		if config.EffectivePermissionMode(cfg.PermissionMode) == config.PermissionModeFullAccess {
 			profileID = codex.PermissionProfileFullAccess
 		}
-		paths := make([]string, 0, len(cfg.Projects))
-		for _, project := range cfg.Projects {
-			paths = append(paths, project.LocalPath)
-		}
-		return codex.PermissionConfig{ProfileID: profileID, ProjectPaths: paths}
+		return codex.PermissionConfig{ProfileID: profileID}
 	})
+	processRuntime, err := processruntime.NewRuntime(codexService, manager, dataRoot)
+	if err != nil {
+		codexHost.Close()
+		return fail(err)
+	}
 	contextResolver, err := newMCPContextResolver(manager, dataRoot)
 	if err != nil {
+		processRuntime.Close()
 		codexHost.Close()
 		return fail(err)
 	}
 	slackRuntime := newSlackRuntime(manager, hub)
 	requestGateway, err := gateway.NewMCP(manager, stateStore, gatewaySlackPoster{runtime: slackRuntime}, hub)
 	if err != nil {
+		processRuntime.Close()
 		codexHost.Close()
 		return fail(err)
 	}
 	slackRuntime.SetProtocolHandler(stateStore, requestGateway.HandleMCPMessage)
 
 	hub.SetComponent("config", "healthy", "authoritative config ready")
-	hub.SetComponent("projects", "healthy", "project registry ready")
 	hub.SetComponent("mcp-relay", "healthy", "MCP-only Slack relay ready")
 	codexRuntime := codexService.Snapshot()
 	if codexRuntime.Configured {
 		hub.SetComponent("codex", "healthy", "stock Codex runtime verified")
-		if err := attachGatewayMCPRuntime(requestGateway, codexHost, contextResolver); err != nil {
-			hub.SetComponent("codex-mcp", "degraded", "Codex MCP relay unavailable")
-			_, _ = hub.RecordError(context.Background(), observability.ErrorInput{
-				Component: "codex-mcp",
-				Operation: "runtime.attach",
-				Message:   err.Error(),
-			})
-		} else {
-			hub.SetComponent("codex-mcp", "healthy", "stock Codex app-server MCP relay with exact-commit contexts attached")
-		}
 	} else {
 		hub.SetComponent("codex", "degraded", "Codex runtime missing or unverified")
-		hub.SetComponent("codex-mcp", "degraded", "Codex MCP relay unavailable")
+	}
+	if err := attachGatewayMCPRuntime(requestGateway, codexHost, contextResolver, processRuntime); err != nil {
+		processRuntime.Close()
+		codexHost.Close()
+		return fail(err)
+	}
+	hub.SetComponent("codex-mcp", "healthy", "stock MCP relay and Core process runtime attached")
+	sweepFailures := contextResolver.sweep(context.Background())
+	if len(sweepFailures) == 0 {
+		hub.SetComponent("workspace", "healthy", "ephemeral worktree root swept")
+	} else {
+		hub.SetComponent("workspace", "degraded", "one or more stale workspace items need attention")
+		for _, sweepErr := range sweepFailures {
+			_, _ = hub.LogRuntime(context.Background(), observability.RuntimeInput{
+				Level: "error", Component: "workspace", Message: "startup.sweep: " + sweepErr.Error(),
+				Fields: map[string]any{"operation": "startup.sweep"},
+			})
+		}
 	}
 	hub.SetComponent("desktop", "healthy", "Wails desktop workflow bindings ready")
 	hub.SetComponent("slack", "setup_required", "Slack credentials and channel are not ready")
@@ -127,14 +146,16 @@ func NewServiceWithPaths(configPath, statePath string) (*Service, error) {
 		Level:     "info",
 		Component: "core",
 		Message:   "Go Core MCP relay, stock Codex app-server and Slack initialized",
-		Fields:    map[string]any{"stage": "S2.4"},
+		Fields:    map[string]any{"stage": "v1.6.1"},
 	}); err != nil {
+		processRuntime.Close()
 		codexHost.Close()
 		return fail(err)
 	}
 	return &Service{
-		config: manager, projects: projects.NewRegistry(manager), state: stateStore, observability: hub,
+		config: manager, state: stateStore, observability: hub,
 		gateway: requestGateway, slack: slackRuntime, codexHost: codexHost,
+		processRuntime: processRuntime, contextResolver: contextResolver,
 	}, nil
 }
 
@@ -169,6 +190,9 @@ func (s *Service) Close() error {
 	if s.slack != nil {
 		s.slack.Close()
 	}
+	if s.processRuntime != nil {
+		s.processRuntime.Close()
+	}
 	if s.codexHost != nil {
 		s.codexHost.Close()
 	}
@@ -179,20 +203,13 @@ func (s *Service) Close() error {
 }
 
 func (s *Service) recordLifecycleError(operation string, err error) {
-	if s == nil || s.observability == nil || err == nil {
-		return
-	}
-	_, _ = s.observability.RecordError(context.Background(), observability.ErrorInput{
-		Component: "core",
-		Operation: operation,
-		Message:   err.Error(),
-	})
+	s.recordOperationalError("core", operation, err)
 }
 
 func (s *Service) RuntimeSnapshot() RuntimeSnapshot {
 	return RuntimeSnapshot{
 		Version: buildinfo.Version, SourceCommit: buildinfo.Commit(),
 		Architecture: "go-core+wails-v2+react-typescript", Core: "go", Desktop: "wails-v2",
-		Platform: runtime.GOOS + "/" + runtime.GOARCH, Stage: "S2.4",
+		Platform: runtime.GOOS + "/" + runtime.GOARCH, Stage: "v1.6.1",
 	}
 }

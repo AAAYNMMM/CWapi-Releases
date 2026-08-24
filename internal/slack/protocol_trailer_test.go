@@ -3,9 +3,9 @@ package slack
 import "testing"
 
 func TestDecodeProtocolAllowsWhitespaceDelimitedSlackTrailer(t *testing.T) {
-	const subject = "[CWapi/MCP/1][MCP_REQUEST][REQ123]"
-	const body = `{"schema":"cwapi.mcp.request.v1","protocol_version":"cwapi-mcp/1","request_id":"REQ123","method":"tools/list","params":{}}`
-	text := "+++\n" + subject + "\n" + body + "\n+++ *发送工具* <@U0BQ09G0SP8>"
+	const subject = "[CWapi/MCP/2][MCP_REQUEST][REQ123]"
+	const body = `{"schema":"cwapi.mcp.request.v2","protocol_version":"cwapi-mcp/2","request_id":"REQ123","method":"mcpServerStatus/list","params":{}}`
+	text := "+++\n" + subject + "\n" + body + "\n+++ *发送工具* <@U0123456789>"
 
 	gotSubject, gotBody, ok := DecodeProtocol(text)
 	if !ok {
@@ -17,7 +17,7 @@ func TestDecodeProtocolAllowsWhitespaceDelimitedSlackTrailer(t *testing.T) {
 }
 
 func TestDecodeProtocolKeepsTrailerOutOfBody(t *testing.T) {
-	const subject = "[CWapi/MCP/1][MCP_RESPONSE][REQ123]"
+	const subject = "[CWapi/MCP/2][MCP_RESPONSE][REQ123]"
 	text := "+++\n" + subject + "\nline1\nline2\n+++ metadata\nadditional trailer"
 
 	gotSubject, gotBody, ok := DecodeProtocol(text)
@@ -30,14 +30,14 @@ func TestDecodeProtocolKeepsTrailerOutOfBody(t *testing.T) {
 }
 
 func TestDecodeProtocolRejectsClosingSuffixWithoutWhitespaceBoundary(t *testing.T) {
-	text := "+++\n[CWapi/MCP/1][MCP_REQUEST][REQ123]\nbody\n++++not-a-frame"
+	text := "+++\n[CWapi/MCP/2][MCP_REQUEST][REQ123]\nbody\n++++not-a-frame"
 	if _, _, ok := DecodeProtocol(text); ok {
 		t.Fatal("non-whitespace closing suffix must not terminate protocol frame")
 	}
 }
 
 func TestDecodeProtocolRequiresOpeningFrameFirst(t *testing.T) {
-	text := "preamble\n+++\n[CWapi/MCP/1][MCP_REQUEST][REQ123]\nbody\n+++"
+	text := "preamble\n+++\n[CWapi/MCP/2][MCP_REQUEST][REQ123]\nbody\n+++"
 	if _, _, ok := DecodeProtocol(text); ok {
 		t.Fatal("protocol traffic with a preamble must be rejected")
 	}

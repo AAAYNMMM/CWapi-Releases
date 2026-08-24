@@ -325,11 +325,12 @@ func (r *slackRuntime) setState(stateValue, detail string) {
 }
 
 func (r *slackRuntime) recordError(operation string, err error) {
-	if err == nil {
+	if r == nil || r.observability == nil || err == nil {
 		return
 	}
-	_, _ = r.observability.RecordError(context.Background(), observability.ErrorInput{
-		Component: "slack", Operation: operation, Message: err.Error(),
+	_, _ = r.observability.LogRuntime(context.Background(), observability.RuntimeInput{
+		Level: "error", Component: "slack", Message: operation + ": " + err.Error(),
+		Fields: map[string]any{"operation": operation},
 	})
 }
 

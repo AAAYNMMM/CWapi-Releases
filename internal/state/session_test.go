@@ -29,9 +29,6 @@ func TestResetRuntimeSessionClearsOldRecordsAndKeepsSchema(t *testing.T) {
 	if _, err := store.AppendRuntimeLog(ctx, RuntimeLogRecord{Timestamp: 1, Level: "info", Component: "old", Message: "old log", FieldsJSON: `{}`}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.UpsertErrorAggregate(ctx, ErrorAggregateRecord{Fingerprint: "old-error", Component: "old", Operation: "old", Message: "old error", Count: 1, FirstSeen: 1, LastSeen: 1, Active: true}); err != nil {
-		t.Fatal(err)
-	}
 	if err := store.SetMetadata(ctx, "slack.last_successful_message_ts", "1.000"); err != nil {
 		t.Fatal(err)
 	}
@@ -45,12 +42,11 @@ func TestResetRuntimeSessionClearsOldRecordsAndKeepsSchema(t *testing.T) {
 	requests, requestErr := store.RecentMCPRequests(ctx, 10)
 	events, eventErr := store.RecentExecutionEvents(ctx, 10)
 	logs, logErr := store.RecentRuntimeLogs(ctx, 10)
-	errors, errorErr := store.RecentErrorAggregates(ctx, 10)
-	if requestErr != nil || eventErr != nil || logErr != nil || errorErr != nil {
-		t.Fatalf("read reset session: request=%v event=%v log=%v error=%v", requestErr, eventErr, logErr, errorErr)
+	if requestErr != nil || eventErr != nil || logErr != nil {
+		t.Fatalf("read reset session: request=%v event=%v log=%v", requestErr, eventErr, logErr)
 	}
-	if len(requests) != 0 || len(events) != 0 || len(logs) != 0 || len(errors) != 0 {
-		t.Fatalf("old session survived reset: requests=%d events=%d logs=%d errors=%d", len(requests), len(events), len(logs), len(errors))
+	if len(requests) != 0 || len(events) != 0 || len(logs) != 0 {
+		t.Fatalf("old session survived reset: requests=%d events=%d logs=%d", len(requests), len(events), len(logs))
 	}
 	if _, found, err := store.Metadata(ctx, "slack.last_successful_message_ts"); err != nil || found {
 		t.Fatalf("old Slack cursor survived reset: found=%v err=%v", found, err)

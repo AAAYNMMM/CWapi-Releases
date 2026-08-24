@@ -1,119 +1,67 @@
-# CWapi v1.6.0 架构
+# CWapi v1.6.1 架构
 
-## 1. 核心定位
+CWapi 是单用户、单机 Windows 应用。系统只保留 Slack transport、Go Core、stock Codex app-server、Git workspace 和 Wails GUI 五个边界。
 
-CWapi 是 Web GPT、Slack 与本机 stock Codex app-server 之间的轻量 MCP Relay。
-
-```text
-Web GPT
-  ├─ GitHub
-  └─ Slack
-      │
-      ▼
-    CWapi
-      │ JSON-RPC
-      ▼
-stock Codex app-server
-      │
-      ▼
-configured MCP servers
-```
-
-CWapi 不承担 Agent planning，也不实现第二套 Git/Test/Build/File 语义平台。packaged `cwapi` MCP server 只实现透明 command/process lifecycle。
-
-## 2. CWapi 职责
-
-- Slack Socket Mode / Web API；
-- MCP envelope 与 schema；
-- source/channel 校验；
-- duplicate / idempotency；
-- request/result/delivery state；
-- stock Codex runtime 校验与 lifecycle；
-- MCP context thread lifecycle；
-- 三层权限模式选择；
-- logs / diagnostics；
-- Credential Manager。
-
-## 3. Codex 职责
-
-CWapi 启动：
+## 请求流
 
 ```text
-codex app-server --stdio
+Slack Socket Mode
+  -> frame + strict JSON v2 decode
+  -> route/scope validation（claim 前）
+  -> SQLite current-session idempotency claim
+  -> global context 或 request-unique repository worktree
+  -> Gateway virtual process runtime / stock Codex MCPHost
+  -> terminal response durable
+  -> Slack delivery state
 ```
 
-初始化时启用 app-server experimental API。CWapi 只把以下 stock MCP 方法暴露给 Slack relay：
+## Core ownership
+
+- Gateway：协议、route、fingerprint、idempotency、delivery。
+- Workspace Manager：一个粗 mutex；共享 bare mirror；每个 repository request 独立 detached exact tree。
+- MCPHost：一个 permission generation；global thread 可复用，repository thread 每请求创建并在 terminal unsubscribe。
+- Process Runtime：Codex/System 共用一个 registry、final invocation resolver、permanent policy 和 Token authorization mutex。
+- Slack Runtime：Socket reconnect、当前会话 cursor、bounded in-memory transport index。
+- Observability：有界 GUI/SQLite 日志；不作为 authoritative process/request state。
+
+## 启动顺序
+
+`NewApp` 只创建 Wails facade。Wails SingleInstanceLock 成功后 `OnStartup` 才构造 Service：
+
+1. 打开严格 config v2，并在任何 authorization/runtime 创建前原子重置 permission mode 为 `safe`；
+2. 打开 SQLite schema 3 并执行 `ResetRuntimeSession`；
+3. 创建 observability、Gateway、Codex/MCPHost、process runtime；
+4. 清理 stale ephemeral worktree；
+5. 启动 Slack supervisor。
+
+config/safe reset/state/Core 构造失败才 fatal。`full_access` 只在当前进程生命周期有效，Slack channel 不受 reset 影响。stale 单项失败仅 degraded；worktree root 完整性异常只阻止 repository readiness。
+
+## Repository 与 Git
+
+唯一 identity parser 接受 GitHub HTTPS owner/repo，输出 lowercase identity 和去 `.git` URL。该结果由 mirror key、fingerprint、Token binding 与日志复用。
+
+目录固定为：
 
 ```text
-mcpServerStatus/list
-mcpServer/resource/read
-mcpServer/tool/call
+CWapi-data/workspaces/git/
+  mirrors/<identity-hash>.git
+  worktrees/<request-id-hash>/
 ```
 
-内部控制：
+MinGit 子进程使用绝对 executable 与最小环境；实际 repository Git I/O 前可解析当前用户已有的外部 `gh auth git-credential` helper。系统不执行版本/登录预检，不维护 GitHub CLI 状态；helper 缺失或凭据失败由 Git 操作直接返回并记录。不修改 global Git config，不继承 GH/GitHub/CWapi/Slack/OpenAI secret 或 debug env。
 
-```text
-thread/start
-thread/unsubscribe
-```
+## Global context
 
-MCP call 必须绑定真实 `threadId`。CWapi 创建 `ephemeral=true` 的 context thread，但**不调用 `turn/start`**，因此不需要模型 Turn 来转发 MCP。
+global stock MCP 的 CWD 固定为 `CWapi-data/temp/mcp-global`。safe 模式唯一 global 动态 writable root 就是该目录；不解析 repository 凭据、不创建 Git tree。
 
-## 4. Permission context
+## Process architecture
 
-每个 context thread 由 CWapi 传入：
+`process_start/status/stop` 是 Gateway/Core virtual tools，不进入 MCPHost。start 在 Core 解析最终 executable、argv、real cwd，执行 permanent policy，再由 Codex safe backend 启动。结构化权限拒绝可签发一次性 Token，下一条新请求在相同 dirty tree 上用当前 Windows 用户的 System backend 执行。
 
-```text
-cwd
-permissions
-```
+每个 Codex process 使用独立 CODEX_HOME/client/sandbox root；不热改 shared MCPHost CODEX_HOME。所有 owned process tree 使用 Windows Job Object 收口。
 
-可选 profile：
+## Desktop
 
-```text
-cwapi-safe
-cwapi-full-access
-```
+Wails 只暴露轻量 snapshot/mutation binding。GUI 是固定 `375 × 690`、不可拉伸的单页窗口；窗口与标题栏由 WebView 绘制全不透明宇宙渐变，不启用 Windows backdrop、layered alpha 或额外 native 背景窗口。四个主卡片在应用内部叠加深色渐变、柔和虚化与高光边界，失焦不改变外观。无导航、project layer、GitHub CLI 检测、Diagnostics、Settings/About page 或可持久化日志偏好。
 
-profile 定义写入 CWapi 自己的 `CODEX_HOME/config.toml`，永久基础命令规则写入 `CODEX_HOME/rules/default.rules`。
-
-权限模式或项目列表变化时，CWapi 不修改正在使用的 thread 语义，而是在下一次 MCP 调用前关闭旧 context 并创建新 context。
-
-## 5. Project configuration
-
-项目列表仍是 CWapi 的产品配置。当前它至少用于：
-
-- GUI 展示；
-- 为 `cwapi-safe` 生成允许写入的 Codex workspace roots；
-- 后续需要时提供项目级路由上下文。
-
-CWapi 不再为每个项目维护 custom managed MCP workspace 状态机。
-
-## 6. State
-
-SQLite 保存当前 CWapi 进程会话需要的事实：
-
-- request identity / fingerprint；
-- terminal response；
-- delivery state；
-- bounded observability data。
-
-应用启动先清空上一进程的 request、execution、runtime log、error 和 Slack cursor，再建立新会话。项目配置、Credential Manager 凭据和 workspace/cache 不属于任务会话，不受影响。SQLite 不保存 custom Tool/workspace 执行平台状态。
-
-## 7. Failure semantics
-
-- app-server process 失效：丢弃 client/context，下次调用重建；
-- MCP tool 调用发生不确定 transport/process failure：不自动 replay；
-- 同一进程内 Slack delivery failure：保留 terminal response，只重发结果，不重跑调用；应用重启不恢复旧结果。
-
-## 8. Security boundary
-
-Slack 做 transport/access 校验；Codex 做本地执行 permission profile / sandbox / exec policy。两者不能混成一层。
-
-任意第三方 local stdio MCP server 只有在其执行受 Codex sandbox/environment 管理，或它支持 Codex permission/sandbox-state 协议时，才能被视为受 thread permission 约束。
-
-packaged `cwapi/process_start` 是明确例外：它接受自由 executable `command + argv`，初始 CWD 绑定 detached exact-commit workspace，但子进程以当前 Windows 用户权限运行，可以访问 workspace 之外的位置。CWapi 不解析命令语义、不管理 runtime；它只向子进程提供不含 CWapi/Slack/Codex secret 的受限环境，并跟踪 stdout/stderr、状态与 owned process tree。
-
-## 9. Runtime
-
-使用 stock `rust-v0.144.4` source tree，不维护 CWapi 私有 Codex fork 功能。CWapi 只固定并验证 packaged executable hash。
+Desktop snapshot 读取 authoritative process registry，并分别最多公开最新一个 structured execution event 与 runtime error；routine runtime info 不进入 GUI。前端按真实时间戳在 process state/output、execution event、runtime error 和本地 mutation 之间选择一条 `key=value` 最新记录；不公开完整日志列表、不提供滚动历史，也不推测脚本进度。运行中展示 `[STOP]` 并调用 Service-owned stop binding；permission mode 与 Slack 配置也在同页通过 Service-owned mutation 完成。首次读取等待 Core 启动，避免把瞬时 `CORE_NOT_STARTED` 暴露为用户错误。

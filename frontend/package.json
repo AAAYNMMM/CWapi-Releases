@@ -1,7 +1,7 @@
 {
   "name": "cwapi-frontend",
   "private": true,
-  "version": "1.6.0",
+  "version": "1.6.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fluentui/react-icons": "2.0.338",
     "react": "19.1.0",
     "react-dom": "19.1.0"
   },

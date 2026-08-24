@@ -17,8 +17,8 @@ func (g *Gateway) emitMCPExecution(request protocol.MCPRequest, stepID, status, 
 		"request_id": request.RequestID,
 		"method":     request.Method,
 	}
-	if request.ProjectID != "" {
-		data["project_id"] = request.ProjectID
+	if request.RepositoryURL != "" {
+		data["repository_url"] = request.RepositoryURL
 		data["expected_commit"] = request.ExpectedCommit
 	}
 	for key, value := range mcpToolIdentity(request) {
@@ -51,7 +51,7 @@ func (g *Gateway) emitMCPDelivery(requestID, status, message string) {
 }
 
 func mcpToolIdentity(request protocol.MCPRequest) map[string]any {
-	if request.Method != "mcpServer/tool/call" {
+	if request.Method != protocol.MCPMethodToolCall {
 		return nil
 	}
 	var params struct {
@@ -77,27 +77,17 @@ func (g *Gateway) emitMCPProcessState(request protocol.MCPRequest, response prot
 		return
 	}
 	tool, _ := identity["tool"].(string)
-	if _, supported := cwapiProcessTools[tool]; !supported {
+	if tool != processToolStart && tool != processToolStatus && tool != processToolStop {
 		return
 	}
-	var result map[string]any
-	if json.Unmarshal(response.Result, &result) != nil {
-		return
-	}
-	text := firstMCPText(result["content"])
 	var record struct {
-		ProcessID         string `json:"process_id"`
-		State             string `json:"state"`
-		InvocationKind    string `json:"invocation_kind"`
-		Runtime           string `json:"runtime"`
-		Entrypoint        string `json:"entrypoint"`
-		CommandName       string `json:"command_name"`
-		CommandPath       string `json:"command_path"`
-		CommandResolution string `json:"command_resolution"`
-		ExecutableKind    string `json:"executable_kind"`
-		WorkingDirectory  string `json:"working_directory"`
+		ProcessID        string `json:"process_id"`
+		State            string `json:"state"`
+		Backend          string `json:"backend"`
+		Repository       string `json:"repository"`
+		WorkingDirectory string `json:"working_directory"`
 	}
-	if json.Unmarshal([]byte(text), &record) != nil {
+	if json.Unmarshal(response.Result, &record) != nil {
 		return
 	}
 	allowedStates := map[string]struct{}{"starting": {}, "running": {}, "completed": {}, "failed": {}, "stopped": {}}
@@ -108,28 +98,15 @@ func (g *Gateway) emitMCPProcessState(request protocol.MCPRequest, response prot
 		"execution_state": "completed",
 		"process_state":   record.State,
 		"process_id":      boundedMCPText(record.ProcessID, 80),
-		"invocation_kind": boundedMCPText(record.InvocationKind, 32),
 	}
-	if record.Runtime != "" {
-		fields["runtime"] = boundedMCPText(record.Runtime, 32)
+	if record.Backend != "" {
+		fields["backend"] = boundedMCPText(record.Backend, 32)
 	}
-	if record.Entrypoint != "" {
-		fields["entrypoint"] = boundedMCPText(record.Entrypoint, 512)
-	}
-	if record.CommandName != "" {
-		fields["command_name"] = boundedMCPText(record.CommandName, 256)
-	}
-	if record.CommandPath != "" {
-		fields["command_path"] = boundedMCPText(record.CommandPath, 512)
-	}
-	if record.CommandResolution != "" {
-		fields["command_resolution"] = boundedMCPText(record.CommandResolution, 32)
-	}
-	if record.ExecutableKind != "" {
-		fields["executable_kind"] = boundedMCPText(record.ExecutableKind, 32)
+	if record.Repository != "" {
+		fields["repository"] = boundedMCPText(record.Repository, 200)
 	}
 	if record.WorkingDirectory != "" {
 		fields["working_directory"] = boundedMCPText(record.WorkingDirectory, 512)
 	}
-	g.emitMCPExecution(request, "process", record.State, "Project process state: "+record.State, startedAt, fields)
+	g.emitMCPExecution(request, "process", record.State, "Process state: "+record.State, startedAt, fields)
 }

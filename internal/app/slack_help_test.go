@@ -8,19 +8,17 @@ import (
 	slackcore "github.com/AAAYNMMM/CWapi/internal/slack"
 )
 
-func TestProtocolHelpExplainsDiscoveryAndConfiguredProjectID(t *testing.T) {
-	cfg := config.Default()
-	cfg.Projects = []config.Project{{
-		ID: "prj-0123456789abcdef01234567", DisplayName: "example-project", Repository: "example/example-project", LocalPath: `E:\private\example-project`,
-	}}
-	text := protocolHelpText(cfg, "CWAPIHELP4000")
-	for _, required := range []string{"CWapi v1.6.0", "source_commit=", "projects/list", "project_id", "expected_commit", "command + argv", "powershell.exe", ".venv/Scripts/python.exe", "node_modules/.bin/tool.cmd", "C:/...", "CWAPIHELP4000", "prj-0123456789abcdef01234567", "example/example-project"} {
+func TestProtocolHelpExplainsStrictV2Contract(t *testing.T) {
+	text := protocolHelpText(config.Default(), "CWAPIHELP4000")
+	for _, required := range []string{"source_commit=", "[CWapi/MCP/2]", "cwapi.mcp.request.v2", "cwapi-mcp/2", "repository_url", "expected_commit", "process_start", "System Token", "CWAPIHELP4000"} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("help missing %q: %s", required, text)
 		}
 	}
-	if strings.Contains(text, `E:\private`) {
-		t.Fatalf("help leaked local path: %s", text)
+	for _, retired := range []string{"projects/list", "project_id", "runtime=python", "entrypoint"} {
+		if strings.Contains(text, retired) {
+			t.Fatalf("help contains retired contract %q: %s", retired, text)
+		}
 	}
 	if requestID := protocolHelpRequestID(slackcore.Message{MessageTS: "1724169600.123456"}); requestID != "CWAPIHELP1724169600123456" {
 		t.Fatalf("help request id=%q", requestID)

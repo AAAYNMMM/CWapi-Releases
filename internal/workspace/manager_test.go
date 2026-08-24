@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -113,7 +114,7 @@ func TestManagerFetchesNewExactCommitIntoExistingMirror(t *testing.T) {
 	}
 }
 
-func TestManagerReusesCleanExactWorkspace(t *testing.T) {
+func TestManagerRecreatesEvenCleanExactWorkspace(t *testing.T) {
 	git, err := exec.LookPath("git")
 	if err != nil {
 		t.Skip("git unavailable")
@@ -137,6 +138,9 @@ func TestManagerReusesCleanExactWorkspace(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(source, "value.txt"), []byte("one\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(source, ".gitignore"), []byte("ignored.tmp\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	run("add", ".")
 	run("commit", "-m", "first")
 	sha := strings.ToLower(run("rev-parse", "HEAD"))
@@ -148,13 +152,23 @@ func TestManagerReusesCleanExactWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	ignored := filepath.Join(first.Path, "ignored.tmp")
+	if err := os.WriteFile(ignored, []byte("request-private state"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if clean, err := IsClean(context.Background(), git, first.Path); err != nil || !clean {
+		t.Fatalf("ignored fixture must leave Git clean: clean=%v err=%v", clean, err)
+	}
 	second, err := manager.Prepare(context.Background(), git, "owner/repo", source, "stable-key", sha)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer manager.Remove(context.Background(), git, second)
 	if first.Path != second.Path || first.ActualSHA != second.ActualSHA {
-		t.Fatalf("workspace was not reused: first=%#v second=%#v", first, second)
+		t.Fatalf("workspace identity changed unexpectedly: first=%#v second=%#v", first, second)
+	}
+	if _, err := os.Stat(ignored); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("clean mutable tree was reused: %v", err)
 	}
 }
 
@@ -164,5 +178,36 @@ func TestSafeTaskIDKeepsDistinctProtocolIdentitiesDistinct(t *testing.T) {
 	withDot := safeTaskID("REQ.workspace")
 	if withColon == withoutColon || withDot == withoutColon || withColon == withDot {
 		t.Fatalf("workspace task IDs collided: colon=%q plain=%q dot=%q", withColon, withoutColon, withDot)
+	}
+}
+
+func TestGitHubCredentialHelperEnvironmentIsProcessLocalAndSecretFree(t *testing.T) {
+	root := t.TempDir()
+	manager, err := NewManager(filepath.Join(root, "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gh := filepath.Join(root, "GitHub CLI", "gh.exe")
+	if err := os.MkdirAll(filepath.Dir(gh), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(gh, []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configDir := filepath.Join(root, "gh-config")
+	if err := manager.ConfigureGitHubCredentialHelper(gh, configDir); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"GH_TOKEN", "GITHUB_TOKEN", "GIT_TRACE", "GIT_CURL_VERBOSE", "GH_DEBUG", "CWAPI_SECRET", "SLACK_BOT_TOKEN", "OPENAI_API_KEY"} {
+		t.Setenv(key, "must-not-leak")
+	}
+	environment := strings.Join(manager.gitEnvironment(), "\n")
+	for _, expected := range []string{"GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_COUNT=1", "credential.https://github.com.helper", filepath.ToSlash(gh), "GH_CONFIG_DIR=" + configDir} {
+		if !strings.Contains(environment, expected) {
+			t.Fatalf("credential environment missing %q: %s", expected, environment)
+		}
+	}
+	if strings.Contains(environment, "must-not-leak") {
+		t.Fatalf("credential environment leaked host secret: %s", environment)
 	}
 }

@@ -3,19 +3,19 @@ package app
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/AAAYNMMM/CWapi/internal/config"
 	"github.com/AAAYNMMM/CWapi/internal/gateway"
+	"github.com/AAAYNMMM/CWapi/internal/repository"
 	"github.com/AAAYNMMM/CWapi/internal/workspace"
 )
 
 type mcpContextResolver struct {
-	config        *config.Manager
 	workspaces    *workspace.Manager
 	gitExecutable string
 }
@@ -28,52 +28,115 @@ func newMCPContextResolver(manager *config.Manager, dataRoot string) (*mcpContex
 	if err != nil {
 		return nil, err
 	}
-	return &mcpContextResolver{
-		config:        manager,
+	resolver := &mcpContextResolver{
 		workspaces:    workspaces,
 		gitExecutable: resolveGitExecutable(),
-	}, nil
+	}
+	return resolver, nil
 }
 
-func (r *mcpContextResolver) PrepareMCPContext(ctx context.Context, _ string, projectID, expectedCommit string) (gateway.MCPExecutionContext, func(), error) {
-	if r == nil || r.config == nil || r.workspaces == nil {
+func (r *mcpContextResolver) sweep(ctx context.Context) []error {
+	if r == nil || r.workspaces == nil {
+		return []error{errors.New("MCP_CONTEXT_RESOLVER_UNAVAILABLE")}
+	}
+	return r.workspaces.Sweep(ctx, r.gitExecutable)
+}
+
+func (r *mcpContextResolver) PrepareMCPContext(ctx context.Context, requestID, repositoryURL, expectedCommit string) (gateway.MCPExecutionContext, func(), error) {
+	if r == nil || r.workspaces == nil {
 		return gateway.MCPExecutionContext{}, nil, errors.New("MCP_CONTEXT_RESOLVER_UNAVAILABLE")
 	}
 	if strings.TrimSpace(r.gitExecutable) == "" {
 		return gateway.MCPExecutionContext{}, nil, errors.New("MCP_GIT_RUNTIME_UNAVAILABLE")
 	}
-	cfg := r.config.Snapshot()
-	var selected *config.Project
-	for index := range cfg.Projects {
-		if cfg.Projects[index].ID == projectID {
-			project := cfg.Projects[index]
-			selected = &project
-			break
-		}
+	identity, err := repository.Parse(repositoryURL)
+	if err != nil {
+		return gateway.MCPExecutionContext{}, nil, err
 	}
-	if selected == nil {
-		return gateway.MCPExecutionContext{}, nil, fmt.Errorf("MCP_PROJECT_NOT_FOUND: %s", projectID)
-	}
+	r.configureRepositoryCredentialHelper()
 
 	prepared, err := r.workspaces.Prepare(
 		ctx,
 		r.gitExecutable,
-		selected.Repository,
-		selected.RemoteURL,
-		selected.ID+":"+strings.ToLower(expectedCommit),
+		identity.Repository,
+		identity.NormalizedURL,
+		requestID,
 		expectedCommit,
 	)
 	if err != nil {
 		return gateway.MCPExecutionContext{}, nil, err
 	}
-	// Exact-commit workspaces are managed caches. Keeping their stable path lets
-	// the Codex MCP context preserve state across consecutive tool calls.
+	release := func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = r.workspaces.Remove(cleanup, r.gitExecutable, prepared)
+	}
 	return gateway.MCPExecutionContext{
-		ProjectID:      selected.ID,
+		RepositoryURL:  identity.NormalizedURL,
 		ExpectedCommit: prepared.ActualSHA,
-		Repository:     selected.Repository,
+		Repository:     identity.Repository,
 		CWD:            prepared.Path,
-	}, nil, nil
+	}, release, nil
+}
+
+// configureRepositoryCredentialHelper keeps private repository authentication
+// lazy and request-scoped. It never runs a GitHub CLI version/auth probe and
+// does not create a separate readiness state; Git reports credential failures.
+func (r *mcpContextResolver) configureRepositoryCredentialHelper() {
+	if r == nil || r.workspaces == nil {
+		return
+	}
+	executable := findGitHubCredentialHelper()
+	configDir := ""
+	if executable != "" {
+		configDir = githubCredentialConfigDir()
+	}
+	_ = r.workspaces.ConfigureGitHubCredentialHelper(executable, configDir)
+}
+
+func findGitHubCredentialHelper() string {
+	candidates := make([]string, 0, 6)
+	if path, err := exec.LookPath("gh.exe"); err == nil {
+		candidates = append(candidates, path)
+	}
+	appendCandidate := func(root string, elements ...string) {
+		if root = strings.TrimSpace(root); root != "" {
+			candidates = append(candidates, filepath.Join(append([]string{root}, elements...)...))
+		}
+	}
+	appendCandidate(os.Getenv("ProgramFiles"), "GitHub CLI", "gh.exe")
+	appendCandidate(os.Getenv("ProgramW6432"), "GitHub CLI", "gh.exe")
+	appendCandidate(os.Getenv("ProgramFiles(x86)"), "GitHub CLI", "gh.exe")
+	appendCandidate(os.Getenv("LOCALAPPDATA"), "Programs", "GitHub CLI", "gh.exe")
+	appendCandidate(os.Getenv("LOCALAPPDATA"), "Microsoft", "WinGet", "Links", "gh.exe")
+
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		absolute, err := filepath.Abs(candidate)
+		if err != nil {
+			continue
+		}
+		absolute = filepath.Clean(absolute)
+		key := strings.ToLower(absolute)
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
+		if info, err := os.Stat(absolute); err == nil && info.Mode().IsRegular() {
+			return absolute
+		}
+	}
+	return ""
+}
+
+func githubCredentialConfigDir() string {
+	if configured := strings.TrimSpace(os.Getenv("GH_CONFIG_DIR")); configured != "" && filepath.IsAbs(configured) {
+		return filepath.Clean(configured)
+	}
+	if appData := strings.TrimSpace(os.Getenv("APPDATA")); appData != "" {
+		return filepath.Join(appData, "GitHub CLI")
+	}
+	return ""
 }
 
 func resolveGitExecutable() string {
@@ -88,9 +151,6 @@ func resolveGitExecutable() string {
 				return candidate
 			}
 		}
-	}
-	if executable, err := exec.LookPath("git"); err == nil {
-		return executable
 	}
 	return ""
 }

@@ -1,15 +1,15 @@
-import { Component, ErrorInfo, ReactNode, StrictMode, useEffect } from "react";
+import { Component, ErrorInfo, ReactNode, StrictMode, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { GUIProbeConfig, ReportFrontendReady, ReportGUIProbe } from "../wailsjs/go/main/App";
 import App from "./App";
+import { callWhenCoreReady } from "./core_startup";
 import { runGUIProbe } from "./gui_probe";
 import { RealSlackProbeConfig, runRealSlackProbe } from "./real_slack_probe";
 import "./app.css";
-import "./gui_density.css";
 
 type BoundaryState = { error: string };
 type GUIProbeConfigValue =
-  | { mode: "first-run" | "workbench"; project_path?: string; source_commit?: string }
+  | { mode: "first-run" | "workbench"; source_commit?: string }
   | RealSlackProbeConfig;
 
 class FrontendErrorBoundary extends Component<{ children: ReactNode }, BoundaryState> {
@@ -37,13 +37,14 @@ class FrontendErrorBoundary extends Component<{ children: ReactNode }, BoundaryS
 }
 
 function RootApp() {
+  const probeStarted = useRef(false);
   useEffect(() => {
-    void ReportFrontendReady("react-mounted-v1").catch((cause) => {
-      console.error("frontend.ready", cause);
-    });
+    if (probeStarted.current) return;
+    probeStarted.current = true;
     void (async () => {
       let mode: GUIProbeConfigValue["mode"] = "first-run";
       try {
+        await callWhenCoreReady(() => ReportFrontendReady("react-mounted-v1"));
         const raw = (await GUIProbeConfig()).trim();
         if (!raw) return;
         const config = JSON.parse(raw) as GUIProbeConfigValue;

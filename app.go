@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"sync"
 
 	coreapp "github.com/AAAYNMMM/CWapi/internal/app"
 	"github.com/AAAYNMMM/CWapi/internal/tray"
@@ -11,37 +14,47 @@ import (
 
 // App is the thin Wails binding facade. Business state lives in the Go core.
 type App struct {
-	ctx     context.Context
-	service *coreapp.Service
-	tray    *tray.Controller
+	mu         sync.RWMutex
+	ctx        context.Context
+	service    *coreapp.Service
+	startupErr error
+	tray       *tray.Controller
 }
 
-func NewApp() (*App, error) {
-	service, err := coreapp.NewService()
-	if err != nil {
-		return nil, err
-	}
-	return &App{service: service}, nil
-}
+func NewApp() *App { return &App{} }
 
 func (a *App) startup(ctx context.Context) {
+	service, err := coreapp.NewService()
+	a.mu.Lock()
 	a.ctx = ctx
-	a.service.Start(ctx)
-	a.tray = tray.New(a.showMainWindow, a.RequestShutdown)
-	if err := a.tray.Start(); err != nil {
-		a.service.DesktopLifecycleError("tray.start", err)
+	a.service, a.startupErr = service, err
+	a.mu.Unlock()
+	if err != nil {
+		fmt.Println("CWapi core startup failed:", err.Error())
+		wailsruntime.Quit(ctx)
 		return
 	}
-	a.service.DesktopLifecycleReady("single-instance window, tray and shutdown lifecycle ready")
+	service.Start(ctx)
+	a.tray = tray.New(a.showMainWindow, a.RequestShutdown)
+	if err := a.tray.Start(); err != nil {
+		service.DesktopLifecycleError("tray.start", err)
+		return
+	}
+	service.DesktopLifecycleReady("single-instance window, tray and shutdown lifecycle ready")
 }
 
 func (a *App) shutdown(context.Context) {
+	service, _ := a.core()
 	if a.tray != nil {
 		if err := a.tray.Close(); err != nil {
-			a.service.DesktopLifecycleError("tray.close", err)
+			if service != nil {
+				service.DesktopLifecycleError("tray.close", err)
+			}
 		}
 	}
-	_ = a.service.Close()
+	if service != nil {
+		_ = service.Close()
+	}
 }
 
 func (a *App) onSecondInstanceLaunch(_ options.SecondInstanceData) {
@@ -49,93 +62,146 @@ func (a *App) onSecondInstanceLaunch(_ options.SecondInstanceData) {
 }
 
 func (a *App) showMainWindow() {
-	if a.ctx == nil {
+	a.mu.RLock()
+	ctx := a.ctx
+	a.mu.RUnlock()
+	if ctx == nil {
 		return
 	}
-	wailsruntime.WindowUnminimise(a.ctx)
-	wailsruntime.Show(a.ctx)
+	wailsruntime.WindowUnminimise(ctx)
+	wailsruntime.Show(ctx)
 }
 
 // RequestShutdown quits the Wails runtime. Service.Close then stops Slack,
 // closes the owned stock Codex app-server process tree and releases Go-owned state.
 func (a *App) RequestShutdown() {
-	if a.ctx == nil {
+	a.mu.RLock()
+	ctx := a.ctx
+	a.mu.RUnlock()
+	if ctx == nil {
 		return
 	}
-	wailsruntime.Quit(a.ctx)
+	wailsruntime.Quit(ctx)
 }
 
 func (a *App) RuntimeSnapshot() coreapp.RuntimeSnapshot {
-	return a.service.RuntimeSnapshot()
+	service, _ := a.core()
+	if service == nil {
+		return coreapp.RuntimeSnapshot{}
+	}
+	return service.RuntimeSnapshot()
 }
 
 func (a *App) DesktopSnapshot(limit int) (coreapp.DesktopSnapshot, error) {
-	return a.service.DesktopSnapshot(a.runtimeContext(), limit)
+	service, err := a.core()
+	if err != nil {
+		return coreapp.DesktopSnapshot{}, err
+	}
+	return service.DesktopSnapshot(a.runtimeContext(), limit)
 }
 
-func (a *App) DiagnosticsSnapshot() (coreapp.DiagnosticsSnapshot, error) {
-	return a.service.DiagnosticsSnapshot(a.runtimeContext())
+func (a *App) StopProcess(processID string) (coreapp.ProcessSnapshot, error) {
+	service, err := a.core()
+	if err != nil {
+		return coreapp.ProcessSnapshot{}, err
+	}
+	return service.StopProcess(processID)
 }
 
 func (a *App) ReadinessSnapshot(limit int) (coreapp.ReadinessSnapshot, error) {
-	return a.service.ReadinessSnapshot(a.runtimeContext(), limit)
+	service, err := a.core()
+	if err != nil {
+		return coreapp.ReadinessSnapshot{}, err
+	}
+	return service.ReadinessSnapshot(a.runtimeContext(), limit)
 }
 
 func (a *App) CodexSnapshot() coreapp.CodexSnapshot {
-	return a.service.CodexSnapshot()
-}
-
-func (a *App) ResolveDesktopError(fingerprint string) (coreapp.ObservabilitySnapshot, error) {
-	return a.service.ResolveDesktopError(a.runtimeContext(), fingerprint)
+	service, _ := a.core()
+	if service == nil {
+		return coreapp.CodexSnapshot{}
+	}
+	return service.CodexSnapshot()
 }
 
 func (a *App) ConfigSnapshot() coreapp.ConfigSnapshot {
-	return a.service.ConfigSnapshot()
+	service, _ := a.core()
+	if service == nil {
+		return coreapp.ConfigSnapshot{}
+	}
+	return service.ConfigSnapshot()
 }
 
 func (a *App) UpdatePermissionMode(mode string) (coreapp.ConfigSnapshot, error) {
-	return a.service.UpdatePermissionMode(mode)
-}
-
-func (a *App) ObservabilitySnapshot() coreapp.ObservabilitySnapshot {
-	return a.service.ObservabilitySnapshot()
+	service, err := a.core()
+	if err != nil {
+		return coreapp.ConfigSnapshot{}, err
+	}
+	return service.UpdatePermissionMode(mode)
 }
 
 func (a *App) RecentMCPRequests(limit int) ([]coreapp.MCPRequestSnapshot, error) {
-	return a.service.RecentMCPRequests(a.runtimeContext(), limit)
+	service, err := a.core()
+	if err != nil {
+		return nil, err
+	}
+	return service.RecentMCPRequests(a.runtimeContext(), limit)
 }
 
 func (a *App) RecentSlackProtocol(prefix string, limit int) []coreapp.SlackMessageSnapshot {
-	return a.service.RecentSlackProtocol(prefix, limit)
+	service, _ := a.core()
+	if service == nil {
+		return nil
+	}
+	return service.RecentSlackProtocol(prefix, limit)
 }
 
 func (a *App) SlackSnapshot() coreapp.SlackSnapshot {
-	return a.service.SlackSnapshot()
+	service, _ := a.core()
+	if service == nil {
+		return coreapp.SlackSnapshot{}
+	}
+	return service.SlackSnapshot()
 }
 
 func (a *App) ConfigureSlack(command coreapp.ConfigureSlackCommand) (coreapp.SlackSnapshot, error) {
-	return a.service.ConfigureSlack(a.runtimeContext(), command)
+	service, err := a.core()
+	if err != nil {
+		return coreapp.SlackSnapshot{}, err
+	}
+	return service.ConfigureSlack(a.runtimeContext(), command)
 }
 
 func (a *App) PostSlackProtocol(subject, body, threadTS string) (coreapp.SlackMessageSnapshot, error) {
-	return a.service.PostSlackProtocol(a.runtimeContext(), subject, body, threadTS)
-}
-
-func (a *App) AddProject(command coreapp.ProjectCommand) (coreapp.ConfigSnapshot, error) {
-	return a.service.AddProject(command)
-}
-
-func (a *App) UpdateProject(id string, command coreapp.ProjectCommand) (coreapp.ConfigSnapshot, error) {
-	return a.service.UpdateProject(id, command)
-}
-
-func (a *App) RemoveProject(id string) (coreapp.ConfigSnapshot, error) {
-	return a.service.RemoveProject(id)
+	service, err := a.core()
+	if err != nil {
+		return coreapp.SlackMessageSnapshot{}, err
+	}
+	return service.PostSlackProtocol(a.runtimeContext(), subject, body, threadTS)
 }
 
 func (a *App) runtimeContext() context.Context {
-	if a.ctx != nil {
-		return a.ctx
+	a.mu.RLock()
+	ctx := a.ctx
+	a.mu.RUnlock()
+	if ctx != nil {
+		return ctx
 	}
 	return context.Background()
+}
+
+func (a *App) core() (*coreapp.Service, error) {
+	if a == nil {
+		return nil, errors.New("CORE_UNAVAILABLE")
+	}
+	a.mu.RLock()
+	service, startupErr := a.service, a.startupErr
+	a.mu.RUnlock()
+	if service != nil {
+		return service, nil
+	}
+	if startupErr != nil {
+		return nil, errors.New("CORE_STARTUP_FAILED")
+	}
+	return nil, errors.New("CORE_NOT_STARTED")
 }

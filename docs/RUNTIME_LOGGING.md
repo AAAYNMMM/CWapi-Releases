@@ -1,73 +1,39 @@
-# CWapi v1.6.0 Logging
+# CWapi v1.6.1 Logging
 
-日志用于回答：当前请求是什么、状态如何、耗时多少、哪里失败。日志不是第二套 authoritative state。
+日志用于定位问题，不是 authoritative request/process state。
 
-## 两类日志
+## Structured execution
 
-### Structured MCP log
+记录 request_id、repository identity/commit（如有）、MCP method、execution/delivery state、elapsed 与 terminal error code。fingerprint、response 和 delivery truth 来自当前会话 SQLite。
 
-记录：
+GUI 不展示 structured execution 列表；desktop snapshot 最多公开最新一个 event，与进程和 runtime error 按时间戳选择最终显示项。
 
-- request_id；
-- project_id / expected_commit（项目相关调用）；
-- stock MCP method；
-- start/elapsed；
-- execution state；
-- delivery state；
-- terminal result/error 摘要。
+## Runtime log
 
-### CWapi runtime log
+记录 Core startup/shutdown、Slack connect/reconnect、Codex/MCPHost、workspace prepare/release、process cleanup、degraded component 和 operational error。CWapi 不再维护独立 Diagnostics/活动错误面板；故障以 `error` 级别直接进入此日志。
 
-记录：
+完整 runtime log 不进入单页 GUI，routine startup/connect 信息也不公开。desktop snapshot 最多公开最新一个 error/fatal record；若它是当前最新数据，GUI 以 `level=... message=...` 等原始 `key=value` 字段显示。该 viewport 不滚动、不保留可见历史。
 
-- startup/shutdown；
-- Slack connect/reconnect；
-- stock Codex app-server startup/recovery；
-- context permission profile / cwd 变化；
-- exact-commit workspace prepare/release；
-- Slack file delivery；
-- process cleanup；
-- runtime warnings/errors。
+## 有界数据
 
-不再记录 custom Toolhost/workspace state 为当前产品事实。
+- GUI：只公开一个最新候选；live observability：内部有界窗口；
+- SQLite observability：独立有界 retention；
+- process stdout/stderr：各保存最后 8192 bytes；
+- 不创建 per-process 完整日志文件；
+- 大 MCP 结果可按需转 Slack File，不逐行刷 Slack。
 
-## State boundary
+## Secret
 
-request terminal truth、fingerprint 和 delivery state 来自 Go/SQLite，不从日志文本反推。
+credential、browser cookie/session、System Token 和敏感 env 不写普通日志。常见 Slack/GitHub/OpenAI token 形态与 keyed secret 会在 observability 入口脱敏。
 
-## Retention
+System Token 的 transport 例外：raw v2 Slack/当前会话 response 可保存以支持重投；Wails public snapshot 只按 schema 对顶层 `system_token` 脱敏，不扫描普通 64hex。
 
-CWapi **没有“日志只保留最近 10 条”的产品约束**。
-
-当前实现使用有界 retention 防止无限增长：
-
-- GUI/live observability 只保留最近的有界窗口；
-- SQLite persistent observability 也有独立上限；
-- request/state 真相不依赖 GUI 日志窗口；
-- 调试时按 request/error 选择必要范围，不默认把整库或整份大日志上传 Slack。
-
-有界 retention 是资源控制，不是“只能查看 10 条”的协议限制。
-
-## 大输出 / Slack
-
-- Slack 不是逐行 stdout；
-- 短结果留在 MCP response；
-- MCP 已返回的长文本/日志可转 Slack File；
-- 单个 artifact 最大 8 MiB，单次 response 最多 16 个；
-- CWapi 不因日志中出现 path/URI 就额外读取本地文件；
-- 不高频重读完整 diagnostics；
-- 不因为 UI refresh 重启 app-server/context。
-
-## Secrets
-
-Slack/Git/API credential、browser session/cookie、敏感 env 不得进入普通日志、MCP payload 或可上传 artifact。
-
-## Acceptance
+## 验收
 
 - 两类日志独立；
-- request elapsed/status 正确；
-- duplicate error 聚合；
-- secret scan PASS；
-- restart 时清空上一运行会话的 request/event/runtime log/error，旧记录不进入当前 UI；
-- Slack 断线不导致 terminal 调用重跑；
-- 不存在固定 10 条 retention 合同。
+- process tail 8KiB 且 UTF-8 有效；
+- operational error 直接进入 runtime log 并带稳定 fingerprint；
+- GUI 只显示真实时间戳最新记录，无完整日志列表、滚动或伪造进度；
+- secret canary 不出现在 child/tail/public GUI；
+- restart 后旧运行会话不进入当前 UI；
+- delivery failure 不重跑有副作用调用。

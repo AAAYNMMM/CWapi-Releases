@@ -12,14 +12,14 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-const cwapiSingleInstanceID = "007f7623-c85d-481d-be63-7e6887667f4c"
+const (
+	cwapiSingleInstanceID = "007f7623-c85d-481d-be63-7e6887667f4c"
+	cwapiWindowWidth      = 375
+	cwapiWindowHeight     = 690
+)
 
 func main() {
-	app, err := NewApp()
-	if err != nil {
-		fmt.Println("CWapi startup failed:", err.Error())
-		return
-	}
+	app := NewApp()
 	if err := wails.Run(applicationOptions(app)); err != nil {
 		fmt.Println("CWapi startup failed:", err.Error())
 	}
@@ -28,15 +28,19 @@ func main() {
 func applicationOptions(app *App) *options.App {
 	return &options.App{
 		Title:             "CWapi",
-		Width:             1280,
-		Height:            820,
-		MinWidth:          960,
-		MinHeight:         640,
+		Width:             cwapiWindowWidth,
+		Height:            cwapiWindowHeight,
+		MinWidth:          cwapiWindowWidth,
+		MinHeight:         cwapiWindowHeight,
+		MaxWidth:          cwapiWindowWidth,
+		MaxHeight:         cwapiWindowHeight,
+		DisableResize:     true,
+		Frameless:         true,
 		HideWindowOnClose: true,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		BackgroundColour: &options.RGBA{R: 20, G: 24, B: 31, A: 1},
+		BackgroundColour: &options.RGBA{R: 8, G: 10, B: 32, A: 255},
 		OnStartup:        app.startup,
 		OnShutdown:       app.shutdown,
 		SingleInstanceLock: &options.SingleInstanceLock{

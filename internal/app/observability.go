@@ -29,17 +29,6 @@ type RuntimeLogSnapshot struct {
 	Fingerprint string `json:"fingerprint"`
 }
 
-type ErrorSnapshot struct {
-	Fingerprint string `json:"fingerprint"`
-	Component   string `json:"component"`
-	Operation   string `json:"operation"`
-	Message     string `json:"message"`
-	Count       int64  `json:"count"`
-	FirstSeen   int64  `json:"first_seen"`
-	LastSeen    int64  `json:"last_seen"`
-	Active      bool   `json:"active"`
-}
-
 type ComponentSnapshot struct {
 	Name      string `json:"name"`
 	State     string `json:"state"`
@@ -52,7 +41,6 @@ type ObservabilitySnapshot struct {
 	StateSchema         string                   `json:"state_schema"`
 	StructuredExecution []ExecutionEventSnapshot `json:"structured_execution"`
 	RuntimeLogs         []RuntimeLogSnapshot     `json:"runtime_logs"`
-	Errors              []ErrorSnapshot          `json:"errors"`
 	Components          []ComponentSnapshot      `json:"components"`
 }
 
@@ -69,10 +57,6 @@ func observabilitySnapshot(source observability.Snapshot) ObservabilitySnapshot 
 	for index, record := range source.RuntimeLogs {
 		runtimeLogs[index] = runtimeLogSnapshot(record)
 	}
-	errors := make([]ErrorSnapshot, len(source.Errors))
-	for index, record := range source.Errors {
-		errors[index] = errorSnapshot(record)
-	}
 	components := make([]ComponentSnapshot, len(source.Components))
 	for index, record := range source.Components {
 		components[index] = ComponentSnapshot{
@@ -87,7 +71,6 @@ func observabilitySnapshot(source observability.Snapshot) ObservabilitySnapshot 
 		StateSchema:         source.StateSchema,
 		StructuredExecution: execution,
 		RuntimeLogs:         runtimeLogs,
-		Errors:              errors,
 		Components:          components,
 	}
 }
@@ -118,19 +101,6 @@ func runtimeLogSnapshot(record state.RuntimeLogRecord) RuntimeLogSnapshot {
 	}
 }
 
-func errorSnapshot(record state.ErrorAggregateRecord) ErrorSnapshot {
-	return ErrorSnapshot{
-		Fingerprint: record.Fingerprint,
-		Component:   record.Component,
-		Operation:   record.Operation,
-		Message:     record.Message,
-		Count:       record.Count,
-		FirstSeen:   record.FirstSeen,
-		LastSeen:    record.LastSeen,
-		Active:      record.Active,
-	}
-}
-
 func (s *Service) runtimeInfo(component, message string, fields map[string]any) {
 	_, _ = s.observability.LogRuntime(context.Background(), observability.RuntimeInput{
 		Level:     "info",
@@ -141,12 +111,13 @@ func (s *Service) runtimeInfo(component, message string, fields map[string]any) 
 }
 
 func (s *Service) recordOperationalError(component, operation string, err error) {
-	if err == nil {
+	if s == nil || s.observability == nil || err == nil {
 		return
 	}
-	_, _ = s.observability.RecordError(context.Background(), observability.ErrorInput{
+	_, _ = s.observability.LogRuntime(context.Background(), observability.RuntimeInput{
+		Level:     "error",
 		Component: component,
-		Operation: operation,
-		Message:   err.Error(),
+		Message:   operation + ": " + err.Error(),
+		Fields:    map[string]any{"operation": operation},
 	})
 }

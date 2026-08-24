@@ -22,12 +22,29 @@ describe("validateMCPResponse", () => {
       .toThrow("SLACK_MCP_E2E_RESPONSE_STATUS_MISMATCH request=REQ123 expected=completed actual=failed");
   });
 
+  it("accepts only the public redaction marker for a required System Token", () => {
+    const expected = { ...toolExpectation, status: "blocked", require_system_token: true };
+    expect(() => validateMCPResponse({ status: "blocked", system_token: "[REDACTED]" }, expected)).not.toThrow();
+    expect(() => validateMCPResponse({ status: "blocked", system_token: "a".repeat(64) }, expected))
+      .toThrow("SLACK_MCP_E2E_SYSTEM_TOKEN_MISSING request=REQ123");
+  });
+
   it("requires expected state from a multi-step tool result", () => {
     const expected = { ...toolExpectation, result_text_contains: "https://github.com/AAAYNMMM/CWapi" };
     expect(() => validateMCPResponse({ status: "completed", result: { content: [{ text: "Page URL: about:blank" }] } }, expected))
       .toThrow("SLACK_MCP_E2E_RESULT_TEXT_MISMATCH request=REQ123 expected=https://github.com/AAAYNMMM/CWapi");
     expect(() => validateMCPResponse({ status: "completed", result: { content: [{ text: "Page URL: https://github.com/AAAYNMMM/CWapi" }] } }, expected))
       .not.toThrow();
+  });
+
+  it("validates direct process records and stable errors", () => {
+    const process = { process_id: "proc-0123456789abcdef01234567", state: "running", backend: "codex" };
+    expect(() => validateMCPResponse({ status: "completed", result: process }, {
+      ...toolExpectation, process_state: "running", backend: "codex", require_process_id: true,
+    })).not.toThrow();
+    expect(() => validateMCPResponse({ status: "blocked", error: { code: "SYSTEM_TOKEN_LIMIT_REACHED" } }, {
+      ...toolExpectation, status: "blocked", error_code: "SYSTEM_TOKEN_LIMIT_REACHED",
+    })).not.toThrow();
   });
 });
 

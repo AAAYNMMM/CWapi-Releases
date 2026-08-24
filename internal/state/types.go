@@ -23,16 +23,3 @@ type RuntimeLogRecord struct {
 	FieldsJSON  string `json:"fields_json"`
 	Fingerprint string `json:"fingerprint"`
 }
-
-// ErrorAggregateRecord deduplicates a persistent error into one active item
-// with an occurrence count rather than a new GUI popup every refresh cycle.
-type ErrorAggregateRecord struct {
-	Fingerprint string `json:"fingerprint"`
-	Component   string `json:"component"`
-	Operation   string `json:"operation"`
-	Message     string `json:"message"`
-	Count       int64  `json:"count"`
-	FirstSeen   int64  `json:"first_seen"`
-	LastSeen    int64  `json:"last_seen"`
-	Active      bool   `json:"active"`
-}

@@ -29,12 +29,13 @@ func (h gatewayMCPToolhost) CallMCP(ctx context.Context, method string, params m
 	})
 }
 
-func attachGatewayMCPRuntime(requestGateway *gateway.Gateway, caller codexMCPCaller, resolver gateway.MCPContextResolver) error {
-	if requestGateway == nil || caller == nil {
+func attachGatewayMCPRuntime(requestGateway *gateway.Gateway, caller codexMCPCaller, resolver gateway.MCPContextResolver, processes gateway.MCPProcessRuntime) error {
+	if requestGateway == nil || (caller == nil && processes == nil) {
 		return errors.New("APP_MCP_RUNTIME_DEPENDENCY_INVALID")
 	}
 	return requestGateway.AttachMCPRuntime(gateway.MCPRuntime{
 		Toolhost:        gatewayMCPToolhost{caller: caller},
 		ContextResolver: resolver,
+		Process:         processes,
 	})
 }

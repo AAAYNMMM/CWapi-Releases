@@ -1,0 +1,15 @@
+{
+  "schema": "cwapi.slack-mcp-e2e.expectations.v2",
+  "requests": [
+    {
+      "request_id": "CW161SMOKESTATUS01",
+      "method": "mcpServerStatus/list",
+      "status": "completed",
+      "delivery_state": "delivered",
+      "min_request_messages": 1,
+      "min_response_messages": 1,
+      "require_response": true,
+      "result_text_not_contains": "\"name\":\"cwapi\""
+    }
+  ]
+}

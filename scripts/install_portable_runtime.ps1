@@ -136,13 +136,10 @@ Write-Host 'CWAPI_PORTABLE_RUNTIME_MCP_START'
 & (Join-Path $PSScriptRoot 'install_playwright_mcp.ps1') -ProjectRoot $ProjectRoot
 if ($LASTEXITCODE -ne 0) { throw "CWAPI_PORTABLE_RUNTIME_MCP_FAILED exit=$LASTEXITCODE" }
 $global:LASTEXITCODE = 0
-$CWapiMCPSource = Join-Path $ProjectRoot 'mcp\cwapi'
-$CWapiMCPRoot = Join-Path $RuntimeRoot 'mcp\cwapi'
-Reset-Directory -Path $CWapiMCPRoot
-foreach ($ProcessMCPFile in @('process-server.cjs', 'process-invocation.cjs', 'process-output.cjs')) {
-    $ProcessMCPSource = Join-Path $CWapiMCPSource $ProcessMCPFile
-    if (-not (Test-Path -LiteralPath $ProcessMCPSource -PathType Leaf)) { throw "CWAPI_PROCESS_MCP_SOURCE_MISSING file=$ProcessMCPFile" }
-    Copy-Item -LiteralPath $ProcessMCPSource -Destination $CWapiMCPRoot
+$RetiredCWapiMCPRoot = Join-Path $RuntimeRoot 'mcp\cwapi'
+if (Test-Path -LiteralPath $RetiredCWapiMCPRoot) {
+    Reset-Directory -Path $RetiredCWapiMCPRoot
+    Remove-Item -LiteralPath $RetiredCWapiMCPRoot -Force
 }
 
 $Browser = $Lock.components.playwright_mcp
@@ -175,10 +172,7 @@ $BrowserManifest | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath (Join-Path
 Write-Host "CWAPI_PORTABLE_RUNTIME_BROWSER_PASS revision=$($Browser.browser_revision) version=$($Browser.browser_version)"
 
 $MCPPackage = Join-Path $RuntimeRoot 'mcp\playwright\node_modules\@playwright\mcp\package.json'
-$ProcessMCP = Join-Path $RuntimeRoot 'mcp\cwapi\process-server.cjs'
-$ProcessMCPInvocation = Join-Path $RuntimeRoot 'mcp\cwapi\process-invocation.cjs'
-$ProcessMCPOutput = Join-Path $RuntimeRoot 'mcp\cwapi\process-output.cjs'
-foreach ($Required in @($CodexExecutable, $GitExecutable, $NodeExecutable, $MCPPackage, $ProcessMCP, $ProcessMCPInvocation, $ProcessMCPOutput, $BrowserExecutable)) {
+foreach ($Required in @($CodexExecutable, $GitExecutable, $NodeExecutable, $MCPPackage, $BrowserExecutable)) {
     if (-not (Test-Path -LiteralPath $Required -PathType Leaf)) { throw "CWAPI_PORTABLE_RUNTIME_COMPONENT_FINAL_MISSING path=$Required" }
 }
 $InstalledMCP = Get-Content -Raw -LiteralPath $MCPPackage | ConvertFrom-Json

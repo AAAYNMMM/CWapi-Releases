@@ -1,180 +1,149 @@
 import { app } from "../wailsjs/go/models";
 
-export type Section = "console" | "projects" | "settings" | "diagnostics" | "about";
-
-export type CodexState = {
-  configured: boolean;
-  ready: boolean;
-  running: boolean;
-  version: string;
-  executable_path: string;
-  executable_sha256: string;
-  browser_mcp_ready: boolean;
-  process_mcp_ready: boolean;
-  node_path: string;
-  browser_path: string;
+export type DesktopState = app.DesktopSnapshot;
+export type Tone = "green" | "yellow" | "red" | "gray";
+export type LatestRecord = {
+  timestamp: number;
+  clock: string;
+  source: string;
+  identity: string;
+  data: string;
+  tone: Tone;
 };
 
-export type MCPRequestState = {
-  request_id: string;
-  source_message_id: string;
-  method: string;
-  tool_name: string;
-  execution_state: string;
-  delivery_state: string;
-  terminal: boolean;
-  created_at: number;
-  updated_at: number;
-  elapsed_ms: number;
-};
-
-export type DesktopState = {
-  generated_at: number;
-  runtime: app.RuntimeSnapshot;
-  config: app.ConfigSnapshot;
-  slack: app.SlackSnapshot;
-  codex: CodexState;
-  mcp_requests: MCPRequestState[];
-  observability: app.ObservabilitySnapshot;
-};
-
-export type DiagnosticsState = {
-  generated_at: number;
-  version: string;
-  source_commit: string;
-  architecture: string;
-  platform: string;
-  stage: string;
-  config_path: string;
-  state_path: string;
-  state_schema: string;
-  slack: app.SlackSnapshot;
-  codex: CodexState;
-  mcp_requests: MCPRequestState[];
-  components: app.ComponentSnapshot[];
-};
-
-export type ProjectForm = {
-  id: string | null;
-  displayName: string;
-  localPath: string;
-  remoteURL: string;
-};
-
-export type GuiPreferences = {
-  logFontSize: number;
-  autoFollow: boolean;
-};
-
-export type LogEntry = {
-  key: string;
-  time: number;
-  head: string;
-  message: string;
-  status?: string;
-  duration?: number;
-};
-
-export function runtimeLogPresentation(level: string, message: string, fieldsJSON: string): { status: string; message: string } {
-  let fields: Record<string, unknown> = {};
-  try {
-    const parsed = JSON.parse(fieldsJSON || "{}");
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) fields = parsed as Record<string, unknown>;
-  } catch {
-    // A malformed historical field must not hide the runtime log row.
-  }
-  const state = typeof fields.state === "string" ? fields.state : "";
-  const detail = typeof fields.detail === "string" ? fields.detail : "";
-  const normalizedLevel = String(level || "").toLowerCase();
-  const status = state || (normalizedLevel === "error" || normalizedLevel === "fatal" ? "failed" : normalizedLevel === "warn" ? "degraded" : "");
-  return { status, message: detail ? `${message} · ${detail}` : message };
-}
-
-export const SECTION_KEY = "cwapi.last-section.v1";
-export const PREF_KEY = "cwapi.gui-preferences.v2";
-export const NAV: Array<{ id: Section; label: string }> = [
-  { id: "console", label: "控制台" },
-  { id: "projects", label: "项目" },
-  { id: "settings", label: "设置" },
-  { id: "diagnostics", label: "诊断" },
-  { id: "about", label: "关于" },
-];
-
-export const EMPTY_PROJECT: ProjectForm = {
-  id: null,
-  displayName: "",
-  localPath: "",
-  remoteURL: "",
-};
-
-const DEFAULT_PREFS: GuiPreferences = { logFontSize: 12, autoFollow: true };
-
-export function initialSection(): Section {
-  const saved = localStorage.getItem(SECTION_KEY) as Section | null;
-  return NAV.some((item) => item.id === saved) ? saved! : "console";
-}
-
-export function getGuiPreferences(): GuiPreferences {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(PREF_KEY) || "{}") as Partial<GuiPreferences>;
-    return {
-      logFontSize: Math.min(20, Math.max(10, Number(parsed.logFontSize ?? 12))),
-      autoFollow: parsed.autoFollow !== false,
-    };
-  } catch {
-    return DEFAULT_PREFS;
-  }
-}
-
-export function formatTime(timestamp: number): string {
-  if (!timestamp) return "—";
-  return new Date(timestamp).toLocaleString();
-}
-
-export function durationText(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return "—";
-  if (value < 1000) return `${Math.round(value)} ms`;
-  const seconds = value / 1000;
-  if (seconds < 60) return `${seconds < 10 ? seconds.toFixed(1) : seconds.toFixed(0)} 秒`;
-  return `${Math.floor(seconds / 60)} 分 ${Math.floor(seconds % 60)} 秒`;
-}
-
-export function statusTone(status: unknown): "green" | "yellow" | "red" | "gray" {
-  const normalized = String(status ?? "").toLowerCase();
-  if (["healthy", "ready", "completed", "delivered", "connected", "running"].some((item) => normalized.includes(item))) return "green";
-  if (["connecting", "starting", "preparing", "pending", "received", "claimed", "waiting", "retry", "degraded", "attention"].some((item) => normalized.includes(item))) return "yellow";
-  if (["failed", "error", "invalid", "timed_out", "blocked", "unavailable"].some((item) => normalized.includes(item))) return "red";
+export function statusTone(status: unknown): Tone {
+  const value = String(status ?? "").toLowerCase();
+  if (["healthy", "ready", "connected", "running", "completed", "delivered"].includes(value)) return "green";
+  if (["starting", "connecting", "received", "claimed", "preparing_workspace", "pending", "degraded", "attention"].includes(value)) return "yellow";
+  if (["failed", "error", "fatal", "blocked", "unavailable"].includes(value)) return "red";
   return "gray";
 }
 
-export function statusText(status: unknown): string {
-  const normalized = String(status ?? "").toLowerCase();
-  const mapping: Record<string, string> = {
-    healthy: "运行中",
-    ready: "运行中",
-    connected: "已连接",
-    starting: "启动中",
-    running: "运行中",
-    received: "已接收",
-    claimed: "已领取",
-    pending: "等待中",
-    preparing_workspace: "准备工作区",
-    completed: "已完成",
-    stopped: "已停止",
-    timed_out: "已超时",
-    blocked: "已阻止",
-    unavailable: "不可用",
-    failed: "失败",
-    degraded: "异常",
-    attention: "需处理",
-    setup_required: "未配置",
-  };
-  return mapping[normalized] ?? String(status || "未知");
+export function isActiveProcess(process: app.ProcessSnapshot): boolean {
+  return process.state === "starting" || process.state === "running";
 }
 
-export function parseGitHubRepository(remote: string): string {
-  const value = remote.trim().replace(/\/+$/, "").replace(/\.git$/i, "");
-  const match = value.match(/github\.com(?::|\/)([^/\s:]+)\/([^/\s]+)$/i);
-  if (!match) throw new Error("Git 地址必须是有效的 GitHub 仓库地址。");
-  return `${match[1]}/${match[2]}`;
+export function activeProcess(processes: app.ProcessSnapshot[]): app.ProcessSnapshot | undefined {
+  return processes.find(isActiveProcess) ?? processes[0];
+}
+
+export function shortProcessID(value: string): string {
+  if (value.length <= 17) return value || "—";
+  return `${value.slice(0, 10)}…${value.slice(-4)}`;
+}
+
+export function shortCommit(value: string): string {
+  return value ? value.slice(0, 8) : "—";
+}
+
+export function elapsedText(process: app.ProcessSnapshot, generatedAt: number): string {
+  const terminal = !isActiveProcess(process);
+  const end = terminal && process.updated_at ? process.updated_at : generatedAt;
+  const milliseconds = Math.max(0, end - process.started_at);
+  if (milliseconds < 1000) return `${milliseconds} ms`;
+  const total = Math.floor(milliseconds / 1000);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  return [hours, minutes, seconds].map((part) => String(part).padStart(2, "0")).join(":");
+}
+
+function clock(timestamp: number): string {
+  if (!timestamp) return "--:--:--.---";
+  const value = new Date(timestamp);
+  const base = [value.getHours(), value.getMinutes(), value.getSeconds()].map((part) => String(part).padStart(2, "0")).join(":");
+  return `${base}.${String(value.getMilliseconds()).padStart(3, "0")}`;
+}
+
+function lastLine(value: string): string {
+  const lines = String(value || "").replace(/\r/g, "").split("\n");
+  for (let index = lines.length - 1; index >= 0; index--) {
+    if (lines[index].trim()) return lines[index].trimEnd();
+  }
+  return "";
+}
+
+function dataValue(value: unknown): string {
+  if (typeof value === "string" && /^[\w./:@+-]+$/.test(value)) return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  try { return JSON.stringify(value); } catch { return JSON.stringify(String(value)); }
+}
+
+function executionData(event: app.ExecutionEventSnapshot): string {
+  let data: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(event.data_json || "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) data = parsed;
+  } catch { data = { data_json: event.data_json }; }
+  const fields: Record<string, unknown> = { status: event.status, kind: event.kind };
+  if (event.step_id) fields.step = event.step_id;
+  if (event.duration_ms) fields.duration_ms = event.duration_ms;
+  Object.assign(fields, data);
+  return Object.entries(fields)
+    .filter(([, value]) => value !== "" && value !== undefined && value !== null)
+    .map(([key, value]) => `${key}=${dataValue(value)}`)
+    .join(" ") || "state=idle";
+}
+
+function runtimeData(record: app.RuntimeLogSnapshot): string {
+  let data: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(record.fields_json || "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) data = parsed;
+  } catch { data = { fields_json: record.fields_json }; }
+  const fields: Record<string, unknown> = { level: record.level, message: record.message };
+  Object.assign(fields, data);
+  return Object.entries(fields)
+    .filter(([, value]) => value !== "" && value !== undefined && value !== null)
+    .map(([key, value]) => `${key}=${dataValue(value)}`)
+    .join(" ") || "level=info";
+}
+
+function processRecords(process?: app.ProcessSnapshot): LatestRecord[] {
+  if (!process) return [];
+  const stateRecord: LatestRecord = {
+    timestamp: process.updated_at,
+    clock: clock(process.updated_at),
+    source: "state",
+    identity: shortProcessID(process.process_id),
+    data: `state=${process.state} backend=${process.backend}${process.exit_code === undefined ? "" : ` exit_code=${process.exit_code}`}`,
+    tone: statusTone(process.state),
+  };
+  const stream = process.latest_stream;
+  const output = stream === "stderr" ? process.stderr_tail : stream === "stdout" ? process.stdout_tail : "";
+  const line = lastLine(output);
+  if (!line || !process.latest_output_at) return [stateRecord];
+  return [stateRecord, {
+    timestamp: process.latest_output_at,
+    clock: clock(process.latest_output_at),
+    source: stream,
+    identity: shortProcessID(process.process_id),
+    data: line,
+    tone: stream === "stderr" ? "red" : "gray",
+  }];
+}
+
+export function buildLatestRecord(snapshot: DesktopState | null, local: LatestRecord | null): LatestRecord {
+  const candidates: LatestRecord[] = local ? [local] : [];
+  if (snapshot) {
+    candidates.push(...processRecords(activeProcess(snapshot.processes)));
+    if (snapshot.latest_execution) candidates.push({
+      timestamp: snapshot.latest_execution.timestamp,
+      clock: clock(snapshot.latest_execution.timestamp),
+      source: "event",
+      identity: snapshot.latest_execution.kind || "execution",
+      data: executionData(snapshot.latest_execution),
+      tone: statusTone(snapshot.latest_execution.status),
+    });
+    if (snapshot.latest_runtime_error) candidates.push({
+      timestamp: snapshot.latest_runtime_error.timestamp,
+      clock: clock(snapshot.latest_runtime_error.timestamp),
+      source: "runtime",
+      identity: snapshot.latest_runtime_error.component || "cwapi",
+      data: runtimeData(snapshot.latest_runtime_error),
+      tone: statusTone(snapshot.latest_runtime_error.level),
+    });
+  }
+  candidates.sort((left, right) => right.timestamp - left.timestamp);
+  return candidates[0] ?? { timestamp: 0, clock: clock(0), source: "state", identity: "cwapi", data: "state=idle active=0", tone: "gray" };
 }

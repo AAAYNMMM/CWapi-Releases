@@ -1,217 +1,48 @@
-# CWapi v1.6.0 GUI
+# CWapi v1.6.1 GUI
 
-这份文档只解释 **CWapi Desktop 每个页面是做什么的**。Slack App 创建见 [`SLACK_SETUP.md`](SLACK_SETUP.md)，权限实现见 [`SECURITY.md`](SECURITY.md)，运行恢复见 [`OPERATIONS.md`](OPERATIONS.md)。
+GUI 是本地状态观察与少量 owner mutation 面板，不承载 protocol truth。
 
-CWapi Desktop 使用 Wails v2 + React + TypeScript。
+## 单页窗口
 
-## 1. 页面总览
+- Wails 窗口固定为 `375 × 690`，不可拉伸。窗口与标题栏使用全不透明宇宙渐变背景；不启用 Windows backdrop、layered alpha 或额外 native 背景窗口，因此前台与失焦外观一致。
+- 全部功能位于一个页面，不保留导航、Console、Settings、Diagnostics 或 About 路由。
+- 顶部只显示 Core、Slack、Codex 状态；主体显示一个当前或最近进程；底部集成 permission mode 与 Slack。执行、最新记录、权限和 Slack 四个主卡片使用应用内深色渐变、柔和虚化与高光边界；最新记录不使用投影。
+- Slack 首次配置使用同一窗口内的 sheet，不创建第二个页面。
 
-当前主要页面：
+GitHub CLI 检测/刷新、project 列表与 CRUD、本地路径编辑、活动错误聚合和 GUI 日志偏好均已删除。
 
-```text
-控制台
-项目
-设置
-诊断
-关于
-```
+## 进程监视
 
-第一次使用推荐顺序：
+进程区域只读取 Go-owned process registry。运行中优先显示 active process，否则显示最近 terminal process，并公开 state、backend、repository、commit、working directory、elapsed 与 active count。
 
-```text
-设置 Slack
-→ 添加项目
-→ 保持 safe 权限
-→ 回控制台确认状态
-→ 有问题再看诊断
-```
+GUI 不推测脚本步骤，也不生成百分比或自然语言进度。实际 stdout/stderr 的最新非空行可作为最新记录；运行中进程显示字面按钮 `[STOP]`，该按钮只停止当前展示的 owned process。短命令与脚本使用同一 process contract。
 
-## 2. 控制台
+## 最新记录
 
-控制台用来回答：
+GUI 不显示完整 CWapi runtime log、结构化日志列表或历史滚动区。一个不可滚动、无边缘阴影的 viewport 只选择真实时间戳最新的一项：
 
-```text
-CWapi 现在正常吗？
-Slack 连上了吗？
-Codex / MCP ready 吗？
-刚才 request 成功还是失败？
-```
+- process state 或最新 stdout/stderr；
+- 最新 structured execution event；
+- 最新 runtime error；routine startup/connect 信息不进入 GUI；
+- 当前 GUI mutation 的结果或错误。
 
-主要状态包括：
+结构化记录直接序列化为 `key=value`，保留来源、identity 和毫秒时间，不把内部字段改写成人造进度。runtime history 仍可在内部 bounded observability 中用于定位问题，但 Wails desktop snapshot 只公开最新一个 error 候选。
 
-- CWapi Desktop；
-- Go Core / MCP Relay；
-- Slack Transport；
-- Codex app-server / MCP Relay；
-- CWapi process MCP。
+## Permission 与 Slack
 
-下面两块日志分别是：
+permission switch 只调用 Service-owned mutation API。API 持 authorization mutex 完成 config 原子写与 active Token clear；GUI 不直接写 config。运行中可临时切换 `FULL`，但每次 Service 启动都会先原子重置为 `SAFE`，因此 `FULL` 不跨重启保留。
 
-```text
-结构化执行日志
-CWapi 运行日志
-```
+Slack 行显示连接状态与频道；配置 sheet 将 App/Bot Token 直接交给 Credential Manager mutation，前端不持久化 secret。channel id 是唯一写入 config 的 Slack 字段。
 
-结构化执行日志更适合看某个 request / tool 的状态和耗时；运行日志更适合看 Slack、Codex、MCP 和 runtime 自己的错误。
+## Public data
 
-日志是诊断面，不是完整项目历史数据库；大日志按需看。
+- process record 不包含 argv、Token、absolute worktree、resolved executable 或内部 handle；
+- Slack MCP v2 body 的顶层非空 `system_token` 显示为 `[REDACTED]`；
+- unrelated 64hex 与嵌套普通字段保持原样；
+- Git credential helper 的 executable/config path 不进入 public snapshot。
 
-## 3. 项目页面
+## Startup / probe
 
-点击：
+前端首次读取等待 Core 完成启动，不把瞬时 `CORE_NOT_STARTED` 显示成故障。Wails mount 会产生 `frontend-ready.json`（仅 gate 环境）；`CWAPI_GUI_PROBE_CONFIG` 支持 first-run、workbench、real-slack 自动验收，普通运行不会创建 probe evidence。
 
-```text
-＋ 添加项目
-```
-
-当前表单主要填写：
-
-```text
-项目名称
-本地路径
-Git 地址
-```
-
-保存后项目卡片会显示：
-
-```text
-项目 ID
-本地路径
-Git 地址
-```
-
-`project_id = prj-...` 由 CWapi 维护。正常 Web GPT 会通过 `projects/list` / discovery 自动取得，不要求用户每次手抄。
-
-项目执行时 CWapi 会另外准备 exact-commit worktree；GUI 里填写的本地项目路径不是要求 Web GPT 直接操作的临时 worktree 路径。
-
-## 4. 设置页面
-
-设置页目前主要有三类内容。
-
-### 界面
-
-可以调整：
-
-```text
-日志字号
-自动滚动到最新日志
-```
-
-### 权限
-
-当前两个模式：
-
-```text
-安全权限 / safe
-完全访问权限 / full_access
-```
-
-第一次使用保持 `safe` 即可。
-
-这里切换的是 **Codex-managed execution** 的默认权限 profile。自由 command/process MCP 的真实边界不同，完整说明见 [`SECURITY.md`](SECURITY.md)。
-
-### Slack
-
-显示当前：
-
-```text
-Workspace
-控制频道名称
-Channel ID
-Credential Store
-```
-
-点击：
-
-```text
-更换 Slack 配置
-```
-
-会出现：
-
-```text
-App Token
-Bot Token
-Channel ID
-验证并保存
-```
-
-第一次不知道这些值从哪里来，不要在 GUI 文档里猜，直接按 [`SLACK_SETUP.md`](SLACK_SETUP.md) 配置。
-
-验证成功后 token 存 Windows Credential Manager，不显示明文保存值。
-
-## 5. 诊断页面
-
-这是出问题时优先看的页面。
-
-主要检查：
-
-- CWapi version / source commit；
-- Slack state；
-- Codex executable / version / SHA；
-- app-server / MCP readiness；
-- permission mode；
-- 活动错误。
-
-常见顺序：
-
-```text
-Slack 没回复
-→ 先看 Slack state
-
-MCP 调不动
-→ 看 Codex / MCP readiness
-
-项目 request 失败
-→ 看项目配置 + 活动错误
-```
-
-然后根据错误码去 [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md)。
-
-## 6. 关于页面
-
-用于确认：
-
-```text
-CWapi 版本
-source commit
-运行平台
-Stock Codex 版本
-```
-
-报告问题时，`version + source commit` 比“我下载了最新 ZIP”可靠得多。
-
-## 7. 关于 Cancel / Stop
-
-当前 stock MCP relay 没有一个可以安全映射为“任意 in-flight tool 已真正取消”的 request-scoped cancel contract，因此 GUI 不应靠改状态伪装取消成功。
-
-如果是 `cwapi/process_start` 启动并记录的长期进程，真正停止它使用：
-
-```text
-process_stop(process_id)
-```
-
-## 8. GUI 不代表旧架构
-
-v1.6.0 当前核心是：
-
-```text
-Slack MCP relay
-→ exact commit
-→ stock Codex app-server
-→ configured MCP server
-```
-
-旧版 Runner、custom Toolhost、`workspace.open`、`test.run`、`build.run`、`automation.run` 等不要从历史截图或旧文档里当成当前 GUI 能力。
-
-## 9. GUI 设计原则
-
-GUI 只展示用户真正需要的状态，不复制 backend state machine：
-
-- background refresh 节流；
-- 日志有界；
-- readiness 查询不启动模型 Turn；
-- 不默认加载大 resource；
-- 不因为 UI 刷新反复重建 app-server / context。
-
-需要使用步骤看 [`USER_GUIDE.md`](USER_GUIDE.md)，不要让 GUI 文档再次长成第二份用户手册。
+关闭窗口默认隐藏到 tray；tray Exit 或应用 shutdown 会停止 Slack、owned process registry 和 Codex process tree。

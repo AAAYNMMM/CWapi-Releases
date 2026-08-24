@@ -2,6 +2,12 @@ package buildinfo
 
 import "testing"
 
+func TestVersion(t *testing.T) {
+	if Version != "1.6.1" {
+		t.Fatalf("Version = %q", Version)
+	}
+}
+
 func TestInjectedSourceCommitWins(t *testing.T) {
 	previous := SourceCommit
 	t.Cleanup(func() { SourceCommit = previous })

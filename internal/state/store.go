@@ -13,8 +13,8 @@ import (
 
 const schemaVersion = "3"
 
-// Store is the single Go-owned SQLite state database for v1.6.0.
-// v1.6.0 uses only its current MCP relay/runtime schema. Older CWapi databases
+// Store is the single Go-owned SQLite state database for v1.6.1.
+// v1.6.1 uses the unchanged schema 3 MCP relay/runtime tables. Other schema
 // are intentionally not imported or migrated.
 type Store struct {
 	path string

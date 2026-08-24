@@ -38,13 +38,6 @@ type RuntimeInput struct {
 	Fields    map[string]any
 }
 
-type ErrorInput struct {
-	Timestamp int64
-	Component string
-	Operation string
-	Message   string
-}
-
 type ComponentSnapshot struct {
 	Name      string `json:"name"`
 	State     string `json:"state"`
@@ -57,7 +50,6 @@ type Snapshot struct {
 	StateSchema         string                       `json:"state_schema"`
 	StructuredExecution []state.ExecutionEventRecord `json:"structured_execution"`
 	RuntimeLogs         []state.RuntimeLogRecord     `json:"runtime_logs"`
-	Errors              []state.ErrorAggregateRecord `json:"errors"`
 	Components          []ComponentSnapshot          `json:"components"`
 }
 
@@ -72,7 +64,6 @@ type Hub struct {
 	stateSchema     string
 	execution       []state.ExecutionEventRecord
 	runtimeLogs     []state.RuntimeLogRecord
-	errors          map[string]state.ErrorAggregateRecord
 	components      map[string]ComponentSnapshot
 
 	nextSubscriber       uint64
@@ -102,14 +93,6 @@ func New(ctx context.Context, store *state.Store, liveLimit, persistentLimit int
 	if err != nil {
 		return nil, err
 	}
-	errorRows, err := store.RecentErrorAggregates(ctx, liveLimit)
-	if err != nil {
-		return nil, err
-	}
-	errorMap := make(map[string]state.ErrorAggregateRecord, len(errorRows))
-	for _, record := range errorRows {
-		errorMap[record.Fingerprint] = record
-	}
 	now := time.Now().UnixMilli()
 	return &Hub{
 		store:                store,
@@ -118,7 +101,6 @@ func New(ctx context.Context, store *state.Store, liveLimit, persistentLimit int
 		stateSchema:          schema,
 		execution:            append([]state.ExecutionEventRecord(nil), execution...),
 		runtimeLogs:          append([]state.RuntimeLogRecord(nil), runtimeLogs...),
-		errors:               errorMap,
 		executionSubscribers: make(map[uint64]chan state.ExecutionEventRecord),
 		runtimeSubscribers:   make(map[uint64]chan state.RuntimeLogRecord),
 		components: map[string]ComponentSnapshot{
@@ -182,50 +164,6 @@ func (h *Hub) LogRuntime(ctx context.Context, input RuntimeInput) (state.Runtime
 	h.mu.Unlock()
 	_ = h.store.PruneObservability(ctx, h.persistentLimit, h.persistentLimit)
 	return persisted, nil
-}
-
-func (h *Hub) RecordError(ctx context.Context, input ErrorInput) (state.ErrorAggregateRecord, error) {
-	timestamp := input.Timestamp
-	if timestamp == 0 {
-		timestamp = time.Now().UnixMilli()
-	}
-	component := Redact(input.Component)
-	operation := Redact(input.Operation)
-	message := Redact(input.Message)
-	key := fingerprint(component, operation, message)
-	record := state.ErrorAggregateRecord{
-		Fingerprint: key,
-		Component:   component,
-		Operation:   operation,
-		Message:     message,
-		Count:       1,
-		FirstSeen:   timestamp,
-		LastSeen:    timestamp,
-		Active:      true,
-	}
-	persisted, err := h.store.UpsertErrorAggregate(ctx, record)
-	if err != nil {
-		return state.ErrorAggregateRecord{}, err
-	}
-	h.mu.Lock()
-	h.errors[key] = persisted
-	h.mu.Unlock()
-	return persisted, nil
-}
-
-func (h *Hub) ResolveError(ctx context.Context, key string) error {
-	timestamp := time.Now().UnixMilli()
-	if err := h.store.ResolveError(ctx, key, timestamp); err != nil {
-		return err
-	}
-	h.mu.Lock()
-	if existing, ok := h.errors[key]; ok {
-		existing.Active = false
-		existing.LastSeen = timestamp
-		h.errors[key] = existing
-	}
-	h.mu.Unlock()
-	return nil
 }
 
 // SubscribeExecution returns a bounded non-blocking live stream. If a
@@ -293,16 +231,6 @@ func (h *Hub) Snapshot() Snapshot {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	errors := make([]state.ErrorAggregateRecord, 0, len(h.errors))
-	for _, record := range h.errors {
-		errors = append(errors, record)
-	}
-	sort.Slice(errors, func(i, j int) bool {
-		if errors[i].Active != errors[j].Active {
-			return errors[i].Active
-		}
-		return errors[i].LastSeen > errors[j].LastSeen
-	})
 	components := make([]ComponentSnapshot, 0, len(h.components))
 	for _, component := range h.components {
 		components = append(components, component)
@@ -314,7 +242,6 @@ func (h *Hub) Snapshot() Snapshot {
 		StateSchema:         h.stateSchema,
 		StructuredExecution: append([]state.ExecutionEventRecord(nil), h.execution...),
 		RuntimeLogs:         append([]state.RuntimeLogRecord(nil), h.runtimeLogs...),
-		Errors:              errors,
 		Components:          components,
 	}
 }

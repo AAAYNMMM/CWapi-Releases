@@ -52,9 +52,9 @@ func newSlackFixture(t *testing.T, sendAckEnvelope bool) *slackFixture {
 		writeJSON(w, map[string]any{"ok": true, "messages": []map[string]any{
 			{"ts": "5.000", "user": "U-OTHER", "text": "ordinary channel conversation"},
 			{"ts": "4.000", "user": "U-OTHER", "text": "[CWapi/MCP/1][MCP_REQUEST][REQNOFRAME]\n{}"},
-			{"ts": "3.000", "user": "U-OTHER", "text": framed("[CWapi/MCP/1][MCP_REQUEST][REQ3]", "third")},
-			{"ts": "2.000", "user": "U-CWAPI", "text": framed("[CWapi/MCP/1][MCP_REQUEST][REQSELF]", "self")},
-			{"ts": "1.000", "user": "U-OTHER", "text": framed("[CWapi/MCP/1][MCP_REQUEST][REQ1]", "first")},
+			{"ts": "3.000", "user": "U-OTHER", "text": framed("[CWapi/MCP/2][MCP_REQUEST][REQ3]", "third")},
+			{"ts": "2.000", "user": "U-CWAPI", "text": framed("[CWapi/MCP/2][MCP_REQUEST][REQSELF]", "self")},
+			{"ts": "1.000", "user": "U-OTHER", "text": framed("[CWapi/MCP/2][MCP_REQUEST][REQ1]", "first")},
 		}})
 	})
 	mux.HandleFunc("/api/chat.postMessage", func(w http.ResponseWriter, r *http.Request) {
@@ -120,7 +120,7 @@ func (f *slackFixture) client(t *testing.T) *Client {
 }
 
 func TestProtocolRoundTripAndNormalization(t *testing.T) {
-	const wantSubject = "[CWapi/MCP/1][MCP_REQUEST][REQ1]"
+	const wantSubject = "[CWapi/MCP/2][MCP_REQUEST][REQ1]"
 	text, err := EncodeProtocol(wantSubject, "line1\r\nline2")
 	if err != nil {
 		t.Fatal(err)
@@ -132,7 +132,7 @@ func TestProtocolRoundTripAndNormalization(t *testing.T) {
 	if _, _, ok := DecodeProtocol("ordinary Slack text"); ok {
 		t.Fatal("ordinary text must not become protocol traffic")
 	}
-	if _, _, ok := DecodeProtocol("+++\n[CWapi/MCP/1][BROKEN]\n{}\n+++"); ok {
+	if _, _, ok := DecodeProtocol("+++\n[CWapi/MCP/2][BROKEN]\n{}\n+++"); ok {
 		t.Fatal("malformed MCP subject must be routed to usage help")
 	}
 }
@@ -162,7 +162,7 @@ func TestHistoryIsBoundedChronologicalAndFiltersSelf(t *testing.T) {
 
 func TestPostProtocolUsesRequestThread(t *testing.T) {
 	fixture := newSlackFixture(t, false)
-	message, err := fixture.client(t).PostProtocol(context.Background(), "[CWapi/MCP/1][MCP_RESPONSE][REQ1]", "done", "1.000")
+	message, err := fixture.client(t).PostProtocol(context.Background(), "[CWapi/MCP/2][MCP_RESPONSE][REQ1]", "done", "1.000")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestPostTextSendsPlainUsageReplyInRequestThread(t *testing.T) {
 func TestTemporaryPostCanBeDeleted(t *testing.T) {
 	fixture := newSlackFixture(t, false)
 	client := fixture.client(t)
-	message, err := client.PostProtocol(context.Background(), "[CWapi/MCP/1][MCP_EVENT][REQSMOKE]", "temporary", "")
+	message, err := client.PostProtocol(context.Background(), "[CWapi/MCP/2][MCP_EVENT][REQSMOKE]", "temporary", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,13 +234,13 @@ func TestEnvelopeFiltersChannelAndSelfAndDeduplicates(t *testing.T) {
 		raw, _ := json.Marshal(map[string]any{"type": "events_api", "envelope_id": "E", "payload": payload})
 		return raw
 	}
-	if _, _, ok, _ := socket.normalizeEnvelope(makeEnvelope("C-OTHER", "U-X", "", "1", "[CWapi/MCP/1][MCP_REQUEST][REQX]")); ok {
+	if _, _, ok, _ := socket.normalizeEnvelope(makeEnvelope("C-OTHER", "U-X", "", "1", "[CWapi/MCP/2][MCP_REQUEST][REQX]")); ok {
 		t.Fatal("wrong channel passed filter")
 	}
-	if _, _, ok, _ := socket.normalizeEnvelope(makeEnvelope("C12345678", "U-CWAPI", "", "2", "[CWapi/MCP/1][MCP_REQUEST][REQX]")); ok {
+	if _, _, ok, _ := socket.normalizeEnvelope(makeEnvelope("C12345678", "U-CWAPI", "", "2", "[CWapi/MCP/2][MCP_REQUEST][REQX]")); ok {
 		t.Fatal("self user passed filter")
 	}
-	_, message, ok, err := socket.normalizeEnvelope(makeEnvelope("C12345678", "U-X", "B-X", "3", "[CWapi/MCP/1][MCP_REQUEST][REQX]"))
+	_, message, ok, err := socket.normalizeEnvelope(makeEnvelope("C12345678", "U-X", "B-X", "3", "[CWapi/MCP/2][MCP_REQUEST][REQX]"))
 	if err != nil || !ok || message.MessageID != "slack:C12345678:3" {
 		t.Fatalf("normalized = %#v ok=%v err=%v", message, ok, err)
 	}
@@ -285,7 +285,7 @@ func TestEnvelopeIgnoresOrdinaryChannelConversation(t *testing.T) {
 func TestIndexEvictsOldest(t *testing.T) {
 	index := NewIndex(2)
 	for _, ts := range []string{"1", "2", "3"} {
-		if !index.Add(Message{MessageID: MessageID("C", ts), Subject: "[CWapi/MCP/1]", MessageTS: ts}) {
+		if !index.Add(Message{MessageID: MessageID("C", ts), Subject: "[CWapi/MCP/2]", MessageTS: ts}) {
 			t.Fatalf("failed to add %s", ts)
 		}
 	}

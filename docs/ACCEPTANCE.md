@@ -1,145 +1,81 @@
-# CWapi v1.6.0 验收标准
+# CWapi v1.6.1 验收标准
 
-v1.6.0 产品功能与真实 Web GPT/Slack 工作流已经完成验收。公开发行包必须从发行仓库的 clean exact commit 重新构建并产生新的 same-commit 证据，不能沿用其他仓库或旧 artifact 的 commit/hash。
+当前状态：v1.6.1 任务已完成，P0-P7 为 `DONE`。本文件保存回归验收标准，不是当前待办列表。
 
-## Source
+只有用户明确要求生成新的正式 portable/Release 时，该新交付才重新执行完整验收：所有结果来自同一 clean source commit 和固定 packaged runtime，且真实 Windows/Codex/Slack 证据不能由文档或单元测试替代。文档差异或仅开发者 source gate 的结果不能单独改变当前 `DONE` 状态。
 
-- expected commit == actual commit；
-- validation 前后 clean；
-- `gofmt -d` clean；
-- `go test ./...` PASS；
-- frontend type/test/build PASS；
-- Wails Windows build PASS；
-- Wails generated bindings 与当前 Go snapshot types 一致；
-- `git diff --check` PASS。
+## Portable 用户交付约定
 
-## Stock Codex relay
+- ZIP 解压到任意用户可写路径后可直接运行 `CWapi.exe`，不依赖盘符、目录名或安装位置；
+- portable 自带 Codex、MinGit、Node、Playwright MCP 与 browser runtime；不要求用户安装 Go、Node、Git、Wails 或设置项目环境变量；
+- 用户只提供 Slack App/Bot Token 与 channel ID，并安装 GitHub CLI；private repository 复用当前 Windows 用户已有的 `gh` 凭据；
+- `CWapi-data` 在程序旁创建，整体移动解压目录后使用新位置自己的数据与 bundled runtime；
+- 正式 ZIP 不含用户配置、凭据、Token、数据库、日志、仓库、浏览器 profile、用户名、机器名或构建机绝对路径；stage 与 ZIP 的目录白名单、敏感文件名、credential shape、private key、active secret 和 build identity 扫描全部 PASS。
 
-- packaged executable SHA-256 匹配 `config/codex-runtime.lock.json`；
-- `codex app-server --stdio` initialize 成功；
-- 允许 `mcpServerStatus/list`；
-- 允许 `mcpServer/resource/read`；
-- 允许 `mcpServer/tool/call`；
-- caller-supplied `threadId` 被拒绝；
-- context 使用 `thread/start` + `ephemeral=true`；
-- 正常 relay 无 `turn/start`；
-- source 中没有 custom `cwapi-dev` / workspace/test/build/automation Tool 平台；
-- production CODEX_HOME 只由 CWapi runtime generator 生成，不再存在第二套 capability catalog/template policy。
+## Source gate
 
-## Permission integration
+- gofmt、`go vet ./...`、`go test ./...`、`git diff --check`；
+- frontend clean install、13+ tests、typecheck、production build；
+- Wails windows/amd64 build；
+- 所有手写 production/frontend/automation 文件 <=400 行目标、<=500 hard；Markdown <=350 hard；
+- 无 project layer、GUI prefs、旧 Node process MCP、`mcp_servers.cwapi`、ProcessMCPReady、v1/config compatibility path。
 
-- 默认 mode = safe；
-- safe -> `cwapi-safe`；
-- full_access -> `cwapi-full-access`；
-- `thread/start.permissions` 与当前 mode 一致；
-- 项目列表与 CWapi data root 进入 safe workspace roots；
-- permission/project 变化后 context fingerprint 变化；
-- `cwapi-full-access` 不使用 `:danger-full-access`；
-- base `rules/default.rules` 存在并可被 stock Codex 加载；
-- system-path deny 存在；
-- secret/idempotency/owned-process 约束不回归。
+## P0 runtime gate
 
-## Exact-commit workspace
+固定 Codex/Node 必须真实证明：
 
-- tool/resource 请求携带 `project_id + expected_commit` 时，CWapi 只解析已配置项目；
-- mirror fetch 后必须证明目标 40-char commit 存在；
-- worktree 使用 detached exact commit；
-- context CWD 指向该 worktree；
-- prepared HEAD 必须等于 `expected_commit`；
-- portable runtime 优先使用随包 `runtime/git/cmd/git.exe`，不要求目标机器预装 Git；
-- workspace cleanup 由 CWapi 生命周期负责。
+- model-free `command/exec`，无 thread/turn；
+- native 与 cmd/bat final executable+argv+cwd；
+- safe current tree 可写，cross-tree/mirror/external/temp 拒绝，nested child 同 sandbox；
+- short stdout/stderr/exit；long descendant 由 Job Object 收口；
+- full structured denial 后同 invocation System 成功；
+- per-execution CODEX_HOME 并发隔离；
+- Codex/System/Git credential helper secret env canary 隔离。
 
-## Slack
+## Protocol / repository
 
-真实链路：
+- request/response/event/Subject 全部 v2；old v1 返回 guidance；
+- route/scope、outer shape、threadId、Token type/position 在 claim 前拒绝；
+- private GitHub repo 与第二 repo exact 40hex commit；
+- same repo+commit 两个 request 使用不同 mutable trees；
+- global context 不解析 repository 凭据、不建 Git tree、safe root 不扩大；
+- URL normalization、commit object、cwd traversal/reparse、PATH drift、batch wrapper drift 对抗测试。
 
-```text
-Web GPT -> Slack -> CWapi -> stock Codex app-server -> MCP server -> result -> Slack
-```
+## Process / authorization
 
-至少验证：
+- Codex/System 共享一个 registry；8 active、48 terminal、trim、700ms、8KiB tails；
+- public record 字段精确，无 Token/argv/absolute internal path；
+- cleanup-once、stop terminal 幂等、4s stop timeout 后 owned cleanup 继续；
+- full denial -> Token -> 新 id System；dirty tree 保留；
+- 3 Token 并存、第 4 个拒绝、TTL、redelivery 不延时、一次性 consume；
+- binding mismatch 不消费；safe/update/issuance/consume race 线性化；
+- permanent policy 对 direct target 生效，nested shell/script 不做虚假解析。
 
-- external request -> terminal response；
-- `project_id + expected_commit` 原样进入真实请求并建立 exact-commit context；
-- duplicate same request 不重复调用；
-- request_id conflict 明确拒绝；
-- Slack reconnect 后 terminal response 可重投；
-- unsupported method 明确拒绝；
-- `MCP_CANCEL` 不是 v1.6.0 protocol family，不提供虚假 cancellation contract；
-- `cwapi/process_start(command, argv)` 通过真实 Slack 在 exact-commit CWD 执行并返回 marker；
-- Playwright `browser_navigate` 通过 stock `mcpServer/tool/call`；
-- Playwright `browser_take_screenshot` 结果至少产生一个 Slack File resource；
-- 长文本/日志、图片、resource text/blob 的 external-file delivery 不重放 MCP tool；
-- 单 artifact 8 MiB、单 response 16 artifact 上限明确生效，超限失败而非静默截断。
+## Session / desktop / package
 
-真实请求样例：`automation/v160_slack_e2e_requests.example.json`；对应 gate expectations：`automation/v160_slack_e2e_expectations.example.json`。
+- same-session duplicate/redelivery；restart 清 request/Token/process；
+- 启动在 authorization/runtime 前原子重置 permission mode 为 `safe`；`full_access` 不跨 restart，写盘失败不得沿旧模式启动，Slack channel 保持；
+- second instance 无 config/state/Core side effect；
+- stale reparse 外部 marker 不变；
+- Wails public snapshot schema-aware Token redaction，unrelated 64hex 保留；
+- GUI 固定 `375 × 690`、不可拉伸且只有一个页面；窗口与标题栏为全不透明宇宙渐变，不使用 Windows backdrop、layered alpha 或额外 native 背景窗口；四个主卡片有应用内深色渐变、柔和虚化与高光边界，最新记录无投影，另一应用获得焦点后外观不变；无 GitHub CLI 状态/刷新、Diagnostics、Settings/About page；
+- process monitor 来自 Go registry，active process 才显示 `[STOP]`；不伪造脚本步骤或百分比；
+- 最新记录不可滚动且无边缘阴影，只显示 process state/output、execution event、runtime error 或本地 mutation 中时间戳最新的一条；routine runtime info 不进入 GUI，operational error 以数据化字段进入该区域，启动竞态不残留 `CORE_NOT_STARTED`；
+- permission mode 与 Slack 配置集成在同一页；
+- portable first-run、relocation、manifest/hash、隐私扫描、无用户数据/gh/legacy CWapi MCP。
 
-## Runtime recovery
+## Real Slack
 
-- app-server crash 后可重建；
-- 同一 CWapi 进程内 Slack reconnect 后，已 terminal response 可重投且不重跑 tool；
-- CWapi 重启后不显示、不重放上一进程任务或 Slack history；
-- ambiguous side-effect tool 不自动 replay；
-- Slack File 上传/完成失败不得触发 MCP tool 重放；
-- shutdown 不遗留 CWapi-owned Codex process。
+configured channel 上至少完成：
 
-## MCP server trust
+- Codex success；
+- full denial -> visible short Token -> 新 id System success；
+- private repo、second repo、3 Token/第 4 个、long/status refresh/stop；
+- same-session duplicate/redelivery；
+- probe evidence 中 Token 为 `[REDACTED]`。
 
-对实际启用的 local MCP server 必须记录并验证：
+真实请求模板见 `automation/v161_slack_e2e_requests.example.json`；expectation 模板见 `automation/v161_slack_e2e_expectations.example.json`。
 
-- 来源；
-- 启动方式；
-- 是否运行于 Codex-managed environment/sandbox；
-- 是否支持 sandbox-state / permission elicitation；
-- 若都不支持，明确把它作为独立受信任程序，而不是假称 thread profile 已限制它。
+## Closeout
 
-v1.6.0 当前 packaged Playwright MCP 必须按这个独立 trust boundary 验收。不得把“由 app-server 启动”自动等同于“继承 thread filesystem/execpolicy sandbox”。
-
-packaged `cwapi` command MCP 还必须验证：
-
-- `process_start(command, argv, cwd?)` 经 stock relay 可用；
-- 正式 Web GPT 请求统一使用 `C:/...` Windows 路径；实现层仍兼容 `C:\\...`，并验证带空格路径、`.venv/Scripts/python.exe` 与 `node_modules/.bin/*.cmd` shim；
-- command 初始 CWD 等于 prepared exact-commit workspace 或其子目录；
-- quick command 返回真实 exit code/stdout/stderr；
-- long command 可 `process_status` / `process_stop`；
-- duplicate request 不重复启动；
-- stop/shutdown 只结束 owned process tree；
-- app-server 与 command 子进程环境不含 CWapi/Slack/Codex secret；
-- 文档明确该 server 以当前 Windows 用户权限运行，不受 thread profile sandbox。
-
-## Portable package
-
-正式 portable 必须包含并验证：
-
-- `CWapi.exe`；
-- stock `runtime/codex/current/bin/codex.exe`；
-- MinGit `runtime/git/cmd/git.exe`；
-- pinned Node；
-- pinned Playwright MCP；
-- pinned Chromium headless shell；
-- `portable-manifest.json` 中 source commit / Codex pin / Git 信息一致；
-- 不包含 Slack token、用户 state/log/result、browser profile/session 或验证临时数据；
-- `CWapi.exe` build metadata 包含 `-trimpath=true`，二进制不含构建机用户目录或源码绝对路径；
-- 从不同盘符、含空格与非 ASCII 字符的路径，以及无关 process working directory 启动成功；
-- relocation 后 Codex、Git、Node、MCP、browser 路径仍从 executable 安装根解析。
-
-## Documentation
-
-当前 README / Architecture / Protocol / Codex / Runtime / Security / GUI / Operations / Stage Plan 不得再把以下旧内容写成当前实现：
-
-```text
-Private patched Codex Toolhost
-cwapi-dev
-workspace.open/status/close
-git.rev_parse/status
-test.run
-build.run
-automation.run
-fs.read/hash/collect
-process.status/cancel
-resources.read
-MCP_CANCEL
-codex-capabilities.yaml policy catalog
-```
-
-历史说明只留在 Git history/CHANGELOG。
+当前 P0-P7 closeout 已完成。以后明确要求新的正式交付时，再记录该次 source commit、portable/Codex hash、Slack request/process IDs 与 gate 输出，并确认 worktree clean、HEAD 不变。不自动 tag/Release。

@@ -1,22 +1,26 @@
 package protocol
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"regexp"
 	"strings"
+
+	"github.com/AAAYNMMM/CWapi/internal/repository"
 )
 
 const (
-	MCPProtocolVersion = "cwapi-mcp/1"
-	MCPRequestSchema   = "cwapi.mcp.request.v1"
-	MCPResponseSchema  = "cwapi.mcp.response.v1"
-	MCPEventSchema     = "cwapi.mcp.event.v1"
+	MCPProtocolVersion = "cwapi-mcp/2"
+	MCPRequestSchema   = "cwapi.mcp.request.v2"
+	MCPResponseSchema  = "cwapi.mcp.response.v2"
+	MCPEventSchema     = "cwapi.mcp.event.v2"
+
+	MCPMethodStatusList   = "mcpServerStatus/list"
+	MCPMethodResourceRead = "mcpServer/resource/read"
+	MCPMethodToolCall     = "mcpServer/tool/call"
 
 	MaxMCPMessageBytes      = 64 * 1024
 	MaxMCPBodyBytes         = 32 * 1024
@@ -28,8 +32,8 @@ var (
 	mcpMethodPattern = regexp.MustCompile(`^[a-z][A-Za-z0-9_.-]*(?:/[a-z][A-Za-z0-9_.-]*)*$`)
 	mcpEventPattern  = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,127}$`)
 	mcpCodePattern   = regexp.MustCompile(`^[A-Z][A-Z0-9_]{1,127}$`)
-	mcpProjectID     = regexp.MustCompile(`^prj-[a-f0-9]{24}$`)
 	mcpCommitSHA     = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
+	mcpSystemToken   = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
 type MCPFamily string
@@ -52,17 +56,20 @@ func BuildMCPSubject(family MCPFamily, requestID string) (string, error) {
 	if !identityPattern.MatchString(requestID) {
 		return "", fmt.Errorf("MCP_REQUEST_ID_INVALID: %q", requestID)
 	}
-	return fmt.Sprintf("[CWapi/MCP/1][%s][%s]", family, requestID), nil
+	return fmt.Sprintf("[CWapi/MCP/2][%s][%s]", family, requestID), nil
 }
 
 func ParseMCPSubject(value string) (MCPSubject, error) {
 	if value != strings.TrimSpace(value) || strings.ContainsAny(value, "\r\n") {
 		return MCPSubject{}, errors.New("MCP_SUBJECT_INVALID")
 	}
-	if !strings.HasPrefix(value, "[CWapi/MCP/1][") || !strings.HasSuffix(value, "]") {
+	if strings.HasPrefix(value, "[CWapi/MCP/1][") {
+		return MCPSubject{}, errors.New("MCP_PROTOCOL_V1_RETIRED_USE_V2")
+	}
+	if !strings.HasPrefix(value, "[CWapi/MCP/2][") || !strings.HasSuffix(value, "]") {
 		return MCPSubject{}, errors.New("MCP_SUBJECT_INVALID")
 	}
-	inner := strings.TrimSuffix(strings.TrimPrefix(value, "[CWapi/MCP/1]["), "]")
+	inner := strings.TrimSuffix(strings.TrimPrefix(value, "[CWapi/MCP/2]["), "]")
 	parts := strings.Split(inner, "][")
 	if len(parts) != 2 {
 		return MCPSubject{}, errors.New("MCP_SUBJECT_INVALID")
@@ -86,19 +93,36 @@ func validMCPFamily(family MCPFamily) bool {
 	}
 }
 
+func allowedMCPMethod(method string) bool {
+	switch method {
+	case MCPMethodStatusList, MCPMethodResourceRead, MCPMethodToolCall:
+		return true
+	default:
+		return false
+	}
+}
+
+func ValidSystemToken(value string) bool {
+	return mcpSystemToken.MatchString(value)
+}
+
 type MCPRequest struct {
 	Schema          string          `json:"schema"`
 	ProtocolVersion string          `json:"protocol_version"`
 	RequestID       string          `json:"request_id"`
-	ProjectID       string          `json:"project_id,omitempty"`
+	RepositoryURL   string          `json:"repository_url,omitempty"`
 	ExpectedCommit  string          `json:"expected_commit,omitempty"`
 	Method          string          `json:"method"`
 	Params          json.RawMessage `json:"params"`
+	SystemToken     string          `json:"system_token,omitempty"`
 }
 
 func DecodeMCPRequest(data []byte) (MCPRequest, error) {
 	if len(data) == 0 || len(data) > MaxMCPMessageBytes {
 		return MCPRequest{}, fmt.Errorf("MCP_REQUEST_SIZE_INVALID: %d", len(data))
+	}
+	if err := validateMCPSystemToken(data); err != nil {
+		return MCPRequest{}, err
 	}
 	var request MCPRequest
 	if err := decodeStrict(data, &request); err != nil {
@@ -113,49 +137,63 @@ func DecodeMCPRequest(data []byte) (MCPRequest, error) {
 	if !identityPattern.MatchString(request.RequestID) {
 		return MCPRequest{}, errors.New("MCP_REQUEST_ID_INVALID")
 	}
-	if len(request.Method) > 128 || !mcpMethodPattern.MatchString(request.Method) {
+	if len(request.Method) > 128 || !mcpMethodPattern.MatchString(request.Method) || !allowedMCPMethod(request.Method) {
 		return MCPRequest{}, fmt.Errorf("MCP_METHOD_INVALID: %q", request.Method)
 	}
-	if (request.ProjectID == "") != (request.ExpectedCommit == "") {
-		return MCPRequest{}, errors.New("MCP_PROJECT_CONTEXT_INCOMPLETE")
+	if (request.RepositoryURL == "") != (request.ExpectedCommit == "") {
+		return MCPRequest{}, errors.New("MCP_REPOSITORY_CONTEXT_INCOMPLETE")
 	}
-	if request.ProjectID != "" {
-		if request.ProjectID != strings.TrimSpace(request.ProjectID) || !mcpProjectID.MatchString(request.ProjectID) {
-			return MCPRequest{}, errors.New("MCP_PROJECT_ID_INVALID")
+	if request.RepositoryURL != "" {
+		identity, err := repository.Parse(request.RepositoryURL)
+		if err != nil {
+			return MCPRequest{}, err
 		}
 		if request.ExpectedCommit != strings.TrimSpace(request.ExpectedCommit) || !mcpCommitSHA.MatchString(request.ExpectedCommit) {
 			return MCPRequest{}, errors.New("MCP_EXPECTED_COMMIT_INVALID")
 		}
+		request.RepositoryURL = identity.NormalizedURL
 		request.ExpectedCommit = strings.ToLower(request.ExpectedCommit)
+	}
+	if request.SystemToken != "" && !mcpSystemToken.MatchString(request.SystemToken) {
+		return MCPRequest{}, errors.New("MCP_SYSTEM_TOKEN_INVALID")
 	}
 	params, err := canonicalJSONObject(request.Params, MaxMCPBodyBytes, "MCP_PARAMS")
 	if err != nil {
 		return MCPRequest{}, err
+	}
+	if containsJSONKey(params, "system_token") {
+		return MCPRequest{}, errors.New("MCP_SYSTEM_TOKEN_INVALID")
 	}
 	request.Params = params
 	return request, nil
 }
 
 func (r MCPRequest) Fingerprint() (string, error) {
-	if !identityPattern.MatchString(r.RequestID) || !mcpMethodPattern.MatchString(r.Method) {
+	if !identityPattern.MatchString(r.RequestID) || !allowedMCPMethod(r.Method) {
 		return "", errors.New("MCP_REQUEST_INVALID")
 	}
-	if (r.ProjectID == "") != (r.ExpectedCommit == "") {
-		return "", errors.New("MCP_PROJECT_CONTEXT_INCOMPLETE")
+	if (r.RepositoryURL == "") != (r.ExpectedCommit == "") {
+		return "", errors.New("MCP_REPOSITORY_CONTEXT_INCOMPLETE")
 	}
-	if r.ProjectID != "" && (!mcpProjectID.MatchString(r.ProjectID) || !mcpCommitSHA.MatchString(r.ExpectedCommit)) {
-		return "", errors.New("MCP_PROJECT_CONTEXT_INVALID")
+	repositoryIdentity := ""
+	if r.RepositoryURL != "" {
+		identity, err := repository.Parse(r.RepositoryURL)
+		if err != nil || !mcpCommitSHA.MatchString(r.ExpectedCommit) {
+			return "", errors.New("MCP_REPOSITORY_CONTEXT_INVALID")
+		}
+		r.RepositoryURL = identity.NormalizedURL
+		repositoryIdentity = identity.Repository
 	}
 	params, err := canonicalJSONObject(r.Params, MaxMCPBodyBytes, "MCP_PARAMS")
 	if err != nil {
 		return "", err
 	}
 	canonical, err := json.Marshal(struct {
-		ProjectID      string          `json:"project_id,omitempty"`
+		Repository     string          `json:"repository,omitempty"`
 		ExpectedCommit string          `json:"expected_commit,omitempty"`
 		Method         string          `json:"method"`
 		Params         json.RawMessage `json:"params"`
-	}{ProjectID: r.ProjectID, ExpectedCommit: strings.ToLower(r.ExpectedCommit), Method: r.Method, Params: params})
+	}{Repository: repositoryIdentity, ExpectedCommit: strings.ToLower(r.ExpectedCommit), Method: r.Method, Params: params})
 	if err != nil {
 		return "", fmt.Errorf("MCP_FINGERPRINT_ENCODE_FAILED: %w", err)
 	}
@@ -207,6 +245,7 @@ type MCPResponse struct {
 	Result          json.RawMessage  `json:"result,omitempty"`
 	Error           *MCPError        `json:"error,omitempty"`
 	Resources       []MCPResourceRef `json:"resources,omitempty"`
+	SystemToken     string           `json:"system_token,omitempty"`
 }
 
 func DecodeMCPResponse(data []byte) (MCPResponse, error) {
@@ -232,6 +271,11 @@ func DecodeMCPResponse(data []byte) (MCPResponse, error) {
 	}
 	if err := validateMCPError(response.Status, response.Error); err != nil {
 		return MCPResponse{}, err
+	}
+	if response.SystemToken != "" {
+		if !mcpSystemToken.MatchString(response.SystemToken) || response.Status != MCPStatusBlocked || response.Error == nil || response.Error.Code != "PERMISSION_DENIED" {
+			return MCPResponse{}, errors.New("MCP_SYSTEM_TOKEN_INVALID")
+		}
 	}
 	for _, resource := range response.Resources {
 		if err := validateMCPResource(resource); err != nil {
@@ -307,33 +351,4 @@ func DecodeMCPEvent(data []byte) (MCPEvent, error) {
 	}
 	event.Data = payload
 	return event, nil
-}
-
-func canonicalJSONObject(raw json.RawMessage, maxBytes int, label string) (json.RawMessage, error) {
-	if len(raw) == 0 {
-		raw = json.RawMessage(`{}`)
-	}
-	if len(raw) > maxBytes {
-		return nil, fmt.Errorf("%s_TOO_LARGE: %d", label, len(raw))
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
-	var value any
-	if err := decoder.Decode(&value); err != nil {
-		return nil, fmt.Errorf("%s_INVALID: %w", label, err)
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return nil, fmt.Errorf("%s_INVALID: trailing JSON value", label)
-		}
-		return nil, fmt.Errorf("%s_INVALID: %w", label, err)
-	}
-	if _, ok := value.(map[string]any); !ok {
-		return nil, fmt.Errorf("%s_MUST_BE_OBJECT", label)
-	}
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return nil, fmt.Errorf("%s_ENCODE_FAILED: %w", label, err)
-	}
-	return encoded, nil
 }

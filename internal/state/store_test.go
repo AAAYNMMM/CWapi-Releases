@@ -45,10 +45,6 @@ func TestFreshStateSchemaPersistsV160State(t *testing.T) {
 	if _, err := store.AppendRuntimeLog(ctx, RuntimeLogRecord{Timestamp: now, Level: "info", Component: "state", Message: "ready", FieldsJSON: `{}`}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.UpsertErrorAggregate(ctx, ErrorAggregateRecord{Fingerprint: "fp-1", Component: "desktop", Operation: "refresh", Message: "failed", Count: 1, FirstSeen: now, LastSeen: now, Active: true}); err != nil {
-		t.Fatal(err)
-	}
-
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -69,10 +65,6 @@ func TestFreshStateSchemaPersistsV160State(t *testing.T) {
 	logs, err := reopened.RecentRuntimeLogs(ctx, 10)
 	if err != nil || len(logs) != 1 || logs[0].Component != "state" {
 		t.Fatalf("runtime logs after reopen: %#v err=%v", logs, err)
-	}
-	errors, err := reopened.RecentErrorAggregates(ctx, 10)
-	if err != nil || len(errors) != 1 || errors[0].Count != 1 || !errors[0].Active {
-		t.Fatalf("error aggregates after reopen: %#v err=%v", errors, err)
 	}
 }
 
@@ -147,27 +139,5 @@ func TestObservabilityRetentionKeepsNewestRecords(t *testing.T) {
 	logs, err := store.RecentRuntimeLogs(ctx, 10)
 	if err != nil || len(logs) != 4 || logs[0].Timestamp != 4 || logs[3].Timestamp != 7 {
 		t.Fatalf("retained logs = %#v err=%v", logs, err)
-	}
-}
-
-func TestErrorAggregateIncrementsInsteadOfCreatingDuplicates(t *testing.T) {
-	ctx := context.Background()
-	store, err := Open(filepath.Join(t.TempDir(), "cwapi.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-
-	first := ErrorAggregateRecord{Fingerprint: "same", Component: "desktop", Operation: "snapshot", Message: "boom", Count: 1, FirstSeen: 10, LastSeen: 10, Active: true}
-	if _, err := store.UpsertErrorAggregate(ctx, first); err != nil {
-		t.Fatal(err)
-	}
-	first.LastSeen = 20
-	result, err := store.UpsertErrorAggregate(ctx, first)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Count != 2 || result.FirstSeen != 10 || result.LastSeen != 20 || !result.Active {
-		t.Fatalf("aggregate = %#v", result)
 	}
 }

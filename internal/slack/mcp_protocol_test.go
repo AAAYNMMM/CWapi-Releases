@@ -6,8 +6,8 @@ import (
 )
 
 func TestMCPProtocolRoundTripUsesSameThinSlackFrame(t *testing.T) {
-	subject := "[CWapi/MCP/1][MCP_REQUEST][REQ123]"
-	body := `{"schema":"cwapi.mcp.request.v1","request_id":"REQ123"}`
+	subject := "[CWapi/MCP/2][MCP_REQUEST][REQ123]"
+	body := `{"schema":"cwapi.mcp.request.v2","request_id":"REQ123"}`
 	text, err := EncodeProtocol(subject, body)
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +42,7 @@ func TestProtocolCandidateRecognizesMissingFrame(t *testing.T) {
 }
 
 func TestMCPProtocolRestoresSlackAutolinkedJSONURL(t *testing.T) {
-	text := "+++\n[CWapi/MCP/1][MCP_REQUEST][REQ123]\n" +
+	text := "+++\n[CWapi/MCP/2][MCP_REQUEST][REQ123]\n" +
 		`{"params":{"arguments":{"url":"<https://example.com/path?a=1&b=2>"}}}` + "\n+++"
 	_, body, ok := DecodeProtocol(text)
 	if !ok {
@@ -64,7 +64,7 @@ func TestMCPProtocolRestoresSlackAutolinkedJSONURL(t *testing.T) {
 }
 
 func TestMCPProtocolRestoresSlackEscapedJavaScriptAndHTML(t *testing.T) {
-	text := "+++\n[CWapi/MCP/1][MCP_REQUEST][REQ123]\n" +
+	text := "+++\n[CWapi/MCP/2][MCP_REQUEST][REQ123]\n" +
 		`{"params":{"arguments":{"function":"() =&gt; '&lt;main&gt;&amp;'"}}}` + "\n+++"
 	_, body, ok := DecodeProtocol(text)
 	if !ok {

@@ -1,0 +1,37 @@
+{
+  "schema": "cwapi.slack-mcp-e2e.requests.v2",
+  "notes": [
+    "Replace OWNER/REPOSITORY and the 40-hex commit before sending.",
+    "Send every body in a +++ framed [CWapi/MCP/2][MCP_REQUEST][request_id] Slack message.",
+    "A System fallback must use a new request_id and copy the redacted-at-GUI raw bearer from the configured Slack channel into top-level system_token.",
+    "Status and stop are global and must use a process_id returned by the long start."
+  ],
+  "requests": [
+    {
+      "subject": "[CWapi/MCP/2][MCP_REQUEST][CW161STATUSLIST01]",
+      "body": {
+        "schema": "cwapi.mcp.request.v2",
+        "protocol_version": "cwapi-mcp/2",
+        "request_id": "CW161STATUSLIST01",
+        "method": "mcpServerStatus/list",
+        "params": {}
+      }
+    },
+    {
+      "subject": "[CWapi/MCP/2][MCP_REQUEST][CW161CODEXSUCCESS01]",
+      "body": {
+        "schema": "cwapi.mcp.request.v2",
+        "protocol_version": "cwapi-mcp/2",
+        "request_id": "CW161CODEXSUCCESS01",
+        "repository_url": "https://github.com/OWNER/REPOSITORY",
+        "expected_commit": "0000000000000000000000000000000000000000",
+        "method": "mcpServer/tool/call",
+        "params": {
+          "server": "cwapi",
+          "tool": "process_start",
+          "arguments": { "command": "cmd.exe", "argv": ["/d", "/c", "echo", "CODEX_OK"] }
+        }
+      }
+    }
+  ]
+}

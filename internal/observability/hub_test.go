@@ -128,7 +128,7 @@ func TestUnserializableFieldsProduceValidRedactionJSON(t *testing.T) {
 	}
 }
 
-func TestPersistentErrorIsAggregatedAndResolvable(t *testing.T) {
+func TestRuntimeErrorsKeepStableFingerprints(t *testing.T) {
 	ctx := context.Background()
 	store, err := state.Open(filepath.Join(t.TempDir(), "cwapi.db"))
 	if err != nil {
@@ -140,26 +140,20 @@ func TestPersistentErrorIsAggregatedAndResolvable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	first, err := hub.RecordError(ctx, ErrorInput{Timestamp: 10, Component: "desktop", Operation: "observability.snapshot", Message: "backend unavailable"})
+	first, err := hub.LogRuntime(ctx, RuntimeInput{Timestamp: 10, Level: "error", Component: "desktop", Message: "observability.snapshot: backend unavailable"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := hub.RecordError(ctx, ErrorInput{Timestamp: 20, Component: "desktop", Operation: "observability.snapshot", Message: "backend unavailable"})
+	second, err := hub.LogRuntime(ctx, RuntimeInput{Timestamp: 20, Level: "error", Component: "desktop", Message: "observability.snapshot: backend unavailable"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Fingerprint != second.Fingerprint || second.Count != 2 || second.FirstSeen != 10 || second.LastSeen != 20 {
-		t.Fatalf("dedup aggregate mismatch: first=%#v second=%#v", first, second)
+	if first.Fingerprint == "" || first.Fingerprint != second.Fingerprint {
+		t.Fatalf("runtime error fingerprint mismatch: first=%#v second=%#v", first, second)
 	}
 	snapshot := hub.Snapshot()
-	if len(snapshot.Errors) != 1 || snapshot.Errors[0].Count != 2 || !snapshot.Errors[0].Active {
-		t.Fatalf("snapshot errors = %#v", snapshot.Errors)
-	}
-	if err := hub.ResolveError(ctx, second.Fingerprint); err != nil {
-		t.Fatal(err)
-	}
-	if hub.Snapshot().Errors[0].Active {
-		t.Fatal("resolved error remained active")
+	if len(snapshot.RuntimeLogs) != 2 || snapshot.RuntimeLogs[0].Level != "error" || snapshot.RuntimeLogs[1].Level != "error" {
+		t.Fatalf("runtime errors = %#v", snapshot.RuntimeLogs)
 	}
 }
 

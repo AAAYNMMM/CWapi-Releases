@@ -10,8 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -55,8 +53,12 @@ type Client struct {
 }
 
 func NewClient(executable, home, stderrLog string, environment []string, startupTimeout time.Duration, onNotification notificationHandler) *Client {
+	cleanLog := ""
+	if strings.TrimSpace(stderrLog) != "" {
+		cleanLog = filepath.Clean(stderrLog)
+	}
 	return &Client{
-		executable: filepath.Clean(executable), home: filepath.Clean(home), stderrLog: filepath.Clean(stderrLog),
+		executable: filepath.Clean(executable), home: filepath.Clean(home), stderrLog: cleanLog,
 		environment: append([]string(nil), environment...), startupTimeout: startupTimeout,
 		onNotification: onNotification, pending: map[int64]chan rpcResponse{}, done: make(chan struct{}),
 	}
@@ -81,8 +83,10 @@ func (c *Client) Start(ctx context.Context) error {
 	if err := os.MkdirAll(c.home, 0o700); err != nil {
 		return fmt.Errorf("CODEX_HOME_CREATE_FAILED: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(c.stderrLog), 0o700); err != nil {
-		return fmt.Errorf("CODEX_LOG_DIR_CREATE_FAILED: %w", err)
+	if c.stderrLog != "" {
+		if err := os.MkdirAll(filepath.Dir(c.stderrLog), 0o700); err != nil {
+			return fmt.Errorf("CODEX_LOG_DIR_CREATE_FAILED: %w", err)
+		}
 	}
 
 	cmd := exec.Command(c.executable, "app-server", "--stdio")
@@ -126,7 +130,7 @@ func (c *Client) Start(ctx context.Context) error {
 		defer cancel()
 	}
 	result, err := c.request(initCtx, "initialize", map[string]any{
-		"clientInfo": map[string]any{"name": "cwapi", "title": "CWapi Codex MCP Relay", "version": "1.6.0"},
+		"clientInfo": map[string]any{"name": "cwapi", "title": "CWapi Codex MCP Relay", "version": "1.6.1"},
 		"capabilities": map[string]any{
 			"experimentalApi":           true,
 			"optOutNotificationMethods": []string{"item/agentMessage/delta", "turn/started", "turn/completed"},
@@ -325,27 +329,11 @@ func (c *Client) dispatch(message map[string]any) {
 	}
 }
 
-func numberToInt64(value any) (int64, bool) {
-	switch typed := value.(type) {
-	case float64:
-		return int64(typed), true
-	case json.Number:
-		value, err := typed.Int64()
-		return value, err == nil
-	case int64:
-		return typed, true
-	case int:
-		return int64(typed), true
-	case string:
-		value, err := strconv.ParseInt(typed, 10, 64)
-		return value, err == nil
-	default:
-		return 0, false
-	}
-}
-
 func (c *Client) readStderr() {
-	file, _ := os.OpenFile(c.stderrLog, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	var file *os.File
+	if c.stderrLog != "" {
+		file, _ = os.OpenFile(c.stderrLog, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	}
 	if file != nil {
 		defer file.Close()
 	}
@@ -397,12 +385,8 @@ func (c *Client) Close() {
 		_ = c.stdin.Close()
 	}
 	if c.cmd != nil && c.cmd.Process != nil {
-		if runtime.GOOS == "windows" {
-			kill := exec.Command("taskkill", "/PID", strconv.Itoa(c.cmd.Process.Pid), "/T", "/F")
-			_ = kill.Run()
-		} else {
-			_ = c.cmd.Process.Kill()
-		}
+		_ = c.releaseProcessTree()
+		_ = c.cmd.Process.Kill()
 	}
 	c.failPending(errors.New("CODEX_CLIENT_CLOSED"))
 }

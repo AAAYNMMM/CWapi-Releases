@@ -1,86 +1,70 @@
-# CWapi v1.6.0 本地验证
+# CWapi v1.6.1 本地验证
 
-## Source checks
+当前 v1.6.1 任务状态为 `DONE`。本文件只供维护者做回归，不是最终用户的安装或环境配置步骤。只有明确要求生成新的正式 portable/Release，或实际修改影响打包与运行链路时，才重新执行相应完整 gate；文档差异或单独的源码检查不会自动重开已完成任务。
 
-常规 Go 改动：
+## 快速回归
 
 ```powershell
-gofmt -d
-go test ./...
+gofmt -l (Get-ChildItem -Recurse -Filter *.go)
 go vet ./...
+go test ./...
 git diff --check
+
+cd frontend
+npm ci
+npm test
+npm run build
 ```
 
-前端/Wails 改动按需运行 typecheck、React build、Wails Windows build。
-
-可选的真实 remote exact-commit integration 不绑定发行者自己的验收仓库。启用 `CWAPI_RUN_REMOTE_EXACT_COMMIT=1` 时，同时提供 `CWAPI_REMOTE_EXACT_REPOSITORY`、`CWAPI_REMOTE_EXACT_URL` 与 40 位 `CWAPI_REMOTE_EXACT_COMMIT`，再运行对应 Go test。
-
-## Public portable gate
-
-发行包必须从 clean exact commit 构建：
+## 开发者源码回归（clean commit）
 
 ```powershell
 $commit = (git rev-parse HEAD).Trim()
-
-powershell -NoProfile -ExecutionPolicy Bypass -File automation/stage_v160_portable.ps1 `
-  -ExpectedCommit $commit `
-  -RuntimeSourceRoot .
-
-powershell -NoProfile -ExecutionPolicy Bypass -File automation/validate_v160_portable_release.ps1 `
-  -ExpectedCommit $commit
+.\automation\validate_v161_source.ps1 -ExpectedCommit $commit
+.\automation\validate_v161_documentation.ps1 -ExpectedCommit $commit
 ```
 
-第二个 gate 会检查 archive privacy、Go `-trimpath`、构建身份字符串、runtime 版本，并把 ZIP 解压到不同盘符且含空格/中文的路径，从无关 working directory 启动真实 GUI。仅在 gate 通过后记录 ZIP SHA-256。
+## 固定 Codex gate
 
-## Stock relay smoke
+```powershell
+.\automation\validate_v161_codex_runtime.ps1 `
+  -ExpectedCommit $commit `
+  -CodexExecutable <portable-root>\runtime\codex\current\bin\codex.exe `
+  -NodeExecutable <portable-root>\runtime\node\node.exe
+```
 
-持续确认：
+单次外部 gate 总等待不超过 3 分钟。超时先定位具体 runtime/网络步骤，不通过无限等待掩盖问题。
 
-- `codex app-server --stdio` 可 initialize；
-- experimental app-server API 已启用；
-- 仅允许三个 stock MCP relay 方法；
-- caller `threadId` 被拒绝；
-- context 使用 `thread/start` / `ephemeral=true`；
-- 正常路径无 `turn/start`；
-- source 中无 custom MCP Tool catalog。
+## Windows package
 
-## Permission smoke
+```powershell
+.\automation\stage_v161_portable.ps1 `
+  -ExpectedCommit $commit `
+  -RuntimeSourceRoot <portable-root>
+.\automation\validate_v161_packaged_gui_start.ps1 -ExpectedCommit $commit
+.\automation\validate_v161_portable_privacy.ps1 `
+  -ExpectedCommit $commit `
+  -PortableRoot .\build\stage\CWapi-v1.6.1 `
+  -ZipPath .\build\stage\CWapi-v1.6.1.zip
+```
 
-验证：
+## Real Slack
 
-- safe 生成/选择 `cwapi-safe`；
-- full_access 生成/选择 `cwapi-full-access`；
-- safe roots 包含配置项目 + CWapi data root；
-- full profile 不使用 `:danger-full-access`；
-- `rules/default.rules` 可由 stock Codex 解析；
-- permission/project 变化后 context fingerprint 变化；
-- system-path deny 和基础 forbidden execpolicy 存在。
+```powershell
+.\automation\prepare_v161_real_slack_validation.ps1 `
+  -ExpectedCommit $commit `
+  -RuntimeSourceRoot <portable-root> `
+  -SlackChannelID <channel> `
+  -PermissionMode full_access
 
-## Slack smoke
+.\automation\validate_v161_real_slack_mcp.ps1 `
+  -ExpectedCommit $commit `
+  -ExecutablePath .\build\validation\CWapi-v1.6.1\CWapi.exe `
+  -ExpectationsPath <expectations.json>
+```
 
-- Socket Mode connect/ACK；
-- configured channel/source；
-- request receive/response delivery；
-- duplicate request；
-- request_id conflict；
-- reconnect/backoff；
-- 同一 CWapi 进程内 terminal result redelivery；
-- unsupported method 明确失败。
+启动前确认没有同 single-instance ID 的旧 CWapi 进程。测试只停止本轮明确启动的 PID，并在 finally 中恢复/清理 gate 数据。
 
-真实 token 不进仓库/fixture。
+## 结果判断
 
-## Recovery
-
-- app-server crash 后可重建；
-- 同一 CWapi 进程内 terminal result 不丢；
-- CWapi restart 后旧任务、日志与 Slack history 不恢复；
-- ambiguous side-effect call 不自动 replay；
-- shutdown 后无 CWapi-owned process 泄漏。
-
-## MCP server trust
-
-实际启用的 local stdio MCP server 必须单独验证启动边界。不能因为 thread 带 permissions 就假定它自动受 filesystem sandbox。
-
-## Same-commit rule
-
-最终证据必须属于同一个 40 位 source commit。任何代码修复生成新 commit 后，旧 candidate 的最终验收不代表新源码。
+对明确发起的某次新交付 gate，通过必须同时满足：command exit 0、gate 明确 PASS marker、source status clean、HEAD 等于 expected commit。只看到 GUI 或只看到 Slack online 不算该次 gate 完成；该判断不改变已经记录的 v1.6.1 `DONE` 状态。

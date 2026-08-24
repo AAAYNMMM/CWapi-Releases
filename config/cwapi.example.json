@@ -1,17 +1,8 @@
 {
-  "schema": "cwapi.config.v1",
-  "version": "1.6.0",
+  "schema": "cwapi.config.v2",
+  "version": "1.6.1",
   "permission_mode": "safe",
   "slack": {
     "channel_id": "C0123456789"
-  },
-  "projects": [
-    {
-      "id": "prj-0123456789abcdef01234567",
-      "display_name": "Example project",
-      "repository": "owner/repository",
-      "local_path": "C:\\Projects\\repository",
-      "remote_url": "https://github.com/owner/repository.git"
-    }
-  ]
+  }
 }

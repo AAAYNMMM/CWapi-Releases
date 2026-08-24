@@ -11,27 +11,17 @@ import (
 	"github.com/AAAYNMMM/CWapi/internal/workspace"
 )
 
-func TestConfiguredProjectPreparesRemoteExactCommit(t *testing.T) {
+func TestRepositoryRequestPreparesRemoteExactCommit(t *testing.T) {
 	if os.Getenv("CWAPI_RUN_REMOTE_EXACT_COMMIT") != "1" {
 		t.Skip("remote exact-commit integration gate is not enabled")
 	}
-	const projectID = "prj-cccccccccccccccccccccccc"
-	repository := strings.TrimSpace(os.Getenv("CWAPI_REMOTE_EXACT_REPOSITORY"))
-	remoteURL := strings.TrimSpace(os.Getenv("CWAPI_REMOTE_EXACT_URL"))
-	commit := strings.TrimSpace(os.Getenv("CWAPI_REMOTE_EXACT_COMMIT"))
-	if repository == "" || remoteURL == "" || commit == "" {
-		t.Fatal("CWAPI_REMOTE_EXACT_REPOSITORY, CWAPI_REMOTE_EXACT_URL and CWAPI_REMOTE_EXACT_COMMIT are required")
-	}
+	const (
+		repository = "aaaynmmm/cwapi-test"
+		remoteURL  = "https://github.com/AAAYNMMM/CWapi-test.git"
+		commit     = "5ff5dc1dd9563731e68b3d40da82314d93adbaa8"
+	)
 	root := t.TempDir()
-	projectPath := filepath.Join(root, "configured-project")
-	if err := os.MkdirAll(projectPath, 0o700); err != nil {
-		t.Fatal(err)
-	}
 	cfg := config.Default()
-	cfg.Projects = []config.Project{{
-		ID: projectID, DisplayName: "remote-exact-project", Repository: repository,
-		LocalPath: projectPath, RemoteURL: remoteURL,
-	}}
 	configPath := filepath.Join(root, "config", "cwapi.json")
 	if err := config.SaveAtomic(configPath, cfg); err != nil {
 		t.Fatal(err)
@@ -44,14 +34,17 @@ func TestConfiguredProjectPreparesRemoteExactCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	execution, release, err := resolver.PrepareMCPContext(context.Background(), "REQREMOTEEXACT", projectID, commit)
+	if override := strings.TrimSpace(os.Getenv("CWAPI_TEST_GIT_EXE")); override != "" {
+		resolver.gitExecutable = filepath.Clean(override)
+	}
+	execution, release, err := resolver.PrepareMCPContext(context.Background(), "REQREMOTEEXACT", remoteURL, commit)
 	if release != nil {
 		defer release()
 	}
 	if err != nil {
 		t.Fatal(err)
 	}
-	if execution.ProjectID != projectID || execution.Repository != repository || execution.ExpectedCommit != commit || !filepath.IsAbs(execution.CWD) {
+	if execution.RepositoryURL != "https://github.com/AAAYNMMM/CWapi-test" || execution.Repository != repository || execution.ExpectedCommit != commit || !filepath.IsAbs(execution.CWD) {
 		t.Fatalf("execution=%#v", execution)
 	}
 	head, err := workspace.Head(context.Background(), resolver.gitExecutable, execution.CWD)

@@ -2,20 +2,28 @@ import { ReadinessSnapshot, RecentSlackProtocol } from "../wailsjs/go/main/App";
 
 export type SlackE2EExpectation = {
   request_id: string;
-  method?: "projects/list" | "mcpServerStatus/list" | "mcpServer/resource/read" | "mcpServer/tool/call";
+  method?: "mcpServerStatus/list" | "mcpServer/resource/read" | "mcpServer/tool/call";
   server?: string;
   tool_name?: string;
-  project_id?: string;
+  repository_url?: string;
+  expected_commit?: string;
   require_exact_commit?: boolean;
   status?: string;
   delivery_state?: string;
   min_request_messages?: number;
+  min_response_messages?: number;
   min_events?: number;
   min_resources?: number;
   min_resource_bytes?: number;
   result_text_contains?: string;
+  result_text_not_contains?: string;
+  error_code?: string;
+  process_state?: "starting" | "running" | "completed" | "failed" | "stopped";
+  backend?: "codex" | "system";
+  require_process_id?: boolean;
   require_response?: boolean;
   require_codex_running?: boolean;
+  require_system_token?: boolean;
 };
 
 export type RealSlackProbeConfig = {
@@ -23,7 +31,7 @@ export type RealSlackProbeConfig = {
   source_commit: string;
   timeout_seconds?: number;
   expectations: {
-    schema: "cwapi.slack-mcp-e2e.expectations.v1";
+    schema: "cwapi.slack-mcp-e2e.expectations.v2";
     requests: SlackE2EExpectation[];
   };
 };
@@ -49,7 +57,7 @@ type RealSlackProbeResult = {
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 function exactSubject(family: string, requestID: string): string {
-  return `[CWapi/MCP/1][${family}][${requestID}]`;
+  return `[CWapi/MCP/2][${family}][${requestID}]`;
 }
 
 function subjectMessages(messages: Awaited<ReturnType<typeof RecentSlackProtocol>>, family: string, requestID: string): ProtocolMessage[] {
@@ -84,6 +92,23 @@ export function validateMCPResponse(response: Record<string, unknown>, expected:
   if (expected.result_text_contains && !JSON.stringify(result).includes(expected.result_text_contains)) {
     throw new Error(`SLACK_MCP_E2E_RESULT_TEXT_MISMATCH request=${expected.request_id} expected=${expected.result_text_contains}`);
   }
+  if (expected.result_text_not_contains && JSON.stringify(result).includes(expected.result_text_not_contains)) {
+    throw new Error(`SLACK_MCP_E2E_RESULT_TEXT_FORBIDDEN request=${expected.request_id} forbidden=${expected.result_text_not_contains}`);
+  }
+  const error = response.error;
+  if (expected.error_code && (!error || typeof error !== "object" || Array.isArray(error) || (error as Record<string, unknown>).code !== expected.error_code)) {
+    throw new Error(`SLACK_MCP_E2E_ERROR_CODE_MISMATCH request=${expected.request_id} expected=${expected.error_code}`);
+  }
+  if (expected.process_state || expected.backend || expected.require_process_id) {
+    if (!result || typeof result !== "object" || Array.isArray(result)) throw new Error(`SLACK_MCP_E2E_PROCESS_RESULT_INVALID request=${expected.request_id}`);
+    const process = result as Record<string, unknown>;
+    if (expected.process_state && process.state !== expected.process_state) throw new Error(`SLACK_MCP_E2E_PROCESS_STATE_MISMATCH request=${expected.request_id}`);
+    if (expected.backend && process.backend !== expected.backend) throw new Error(`SLACK_MCP_E2E_PROCESS_BACKEND_MISMATCH request=${expected.request_id}`);
+    if (expected.require_process_id && !/^proc-[0-9a-f]{24}$/.test(String(process.process_id || ""))) throw new Error(`SLACK_MCP_E2E_PROCESS_ID_MISSING request=${expected.request_id}`);
+  }
+  if (expected.require_system_token && response.system_token !== "[REDACTED]") {
+    throw new Error(`SLACK_MCP_E2E_SYSTEM_TOKEN_MISSING request=${expected.request_id}`);
+  }
 }
 
 export function validateMCPResources(resources: Array<Record<string, unknown>>, expected: SlackE2EExpectation): void {
@@ -116,9 +141,10 @@ function validateRequestEnvelope(
   if (!request) return false;
   if (request.request_id !== expected.request_id) throw new Error(`SLACK_MCP_E2E_REQUEST_BODY_ID_MISMATCH request=${expected.request_id}`);
   if (expected.method && request.method !== expected.method) throw new Error(`SLACK_MCP_E2E_REQUEST_METHOD_MISMATCH request=${expected.request_id}`);
-  if (expected.project_id && request.project_id !== expected.project_id) throw new Error(`SLACK_MCP_E2E_PROJECT_MISMATCH request=${expected.request_id}`);
-  if (expected.require_exact_commit && String(request.expected_commit || "").toLowerCase() !== sourceCommit) {
-    throw new Error(`SLACK_MCP_E2E_EXACT_COMMIT_MISMATCH request=${expected.request_id} expected=${sourceCommit} actual=${request.expected_commit || ""}`);
+  if (expected.repository_url && request.repository_url !== expected.repository_url) throw new Error(`SLACK_MCP_E2E_REPOSITORY_MISMATCH request=${expected.request_id}`);
+  const expectedCommit = (expected.expected_commit || (expected.require_exact_commit ? sourceCommit : "")).toLowerCase();
+  if (expectedCommit && String(request.expected_commit || "").toLowerCase() !== expectedCommit) {
+	throw new Error(`SLACK_MCP_E2E_EXACT_COMMIT_MISMATCH request=${expected.request_id} expected=${expectedCommit} actual=${request.expected_commit || ""}`);
   }
   if (expected.server || expected.tool_name) {
     const params = request.params;
@@ -163,7 +189,7 @@ function transportReady(messages: Awaited<ReturnType<typeof RecentSlackProtocol>
   const eventCount = countSubject(messages, "MCP_EVENT", expected.request_id);
   if (requestCount < Math.max(1, Number(expected.min_request_messages || 1))) return false;
   if (!validateRequestEnvelope(messages, expected, sourceCommit)) return false;
-  if (expected.require_response !== false && responseCount < 1) return false;
+  if (expected.require_response !== false && responseCount < Math.max(1, Number(expected.min_response_messages || 1))) return false;
   const response = parseBody(responses[responses.length - 1]);
   if (expected.require_response !== false && !response) return false;
   if (response) validateMCPResponse(response, expected);
@@ -191,12 +217,12 @@ function completedEvidence(
 function validateConfig(config: RealSlackProbeConfig) {
   if (config.mode !== "real-slack") throw new Error("SLACK_MCP_E2E_MODE_INVALID");
   if (!/^[0-9a-fA-F]{40}$/.test(config.source_commit || "")) throw new Error("SLACK_MCP_E2E_COMMIT_INVALID");
-  if (config.expectations?.schema !== "cwapi.slack-mcp-e2e.expectations.v1") throw new Error("SLACK_MCP_E2E_EXPECTATIONS_INVALID");
+  if (config.expectations?.schema !== "cwapi.slack-mcp-e2e.expectations.v2") throw new Error("SLACK_MCP_E2E_EXPECTATIONS_INVALID");
   if (!Array.isArray(config.expectations.requests) || config.expectations.requests.length === 0) throw new Error("SLACK_MCP_E2E_EXPECTATIONS_EMPTY");
   const ids = new Set<string>();
   for (const expected of config.expectations.requests) {
     if (!expected.request_id || ids.has(expected.request_id)) throw new Error(`SLACK_MCP_E2E_REQUEST_ID_INVALID:${expected.request_id || "missing"}`);
-    if (expected.require_exact_commit && !expected.project_id) throw new Error(`SLACK_MCP_E2E_PROJECT_REQUIRED:${expected.request_id}`);
+    if ((expected.require_exact_commit || expected.expected_commit) && !expected.repository_url) throw new Error(`SLACK_MCP_E2E_REPOSITORY_REQUIRED:${expected.request_id}`);
     ids.add(expected.request_id);
   }
 }
@@ -206,7 +232,7 @@ export async function runRealSlackProbe(config: RealSlackProbeConfig): Promise<R
   try {
     validateConfig(config);
     const expectedCommit = config.source_commit.toLowerCase();
-    const timeoutSeconds = Math.max(30, Math.min(1800, Number(config.timeout_seconds || 300)));
+    const timeoutSeconds = Math.max(30, Math.min(150, Number(config.timeout_seconds || 120)));
     const deadline = Date.now() + timeoutSeconds * 1000;
     let readiness: Awaited<ReturnType<typeof ReadinessSnapshot>> | undefined;
 
@@ -230,7 +256,7 @@ export async function runRealSlackProbe(config: RealSlackProbeConfig): Promise<R
     while (Date.now() < deadline && completed.size < config.expectations.requests.length) {
       const current = await ReadinessSnapshot(100);
       const requests = Array.isArray(current.recent_requests) ? current.recent_requests : [];
-      const protocolMessages = await RecentSlackProtocol("[CWapi/MCP/1]", 500);
+      const protocolMessages = await RecentSlackProtocol("[CWapi/MCP/2]", 500);
       if (!Array.isArray(protocolMessages)) throw new Error("SLACK_MCP_E2E_PROTOCOL_INDEX_INVALID");
 
       for (const expected of config.expectations.requests) {
@@ -261,7 +287,7 @@ export async function runRealSlackProbe(config: RealSlackProbeConfig): Promise<R
       success: true,
       checks,
       evidence: {
-        schema: "cwapi.slack-mcp-e2e.result.v1",
+        schema: "cwapi.slack-mcp-e2e.result.v2",
         source_commit: finalReadiness.runtime.source_commit,
         slack_state: finalReadiness.slack.state,
         slack_socket_ready: finalReadiness.slack.socket_ready,

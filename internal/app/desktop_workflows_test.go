@@ -2,10 +2,10 @@ package app
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"testing"
 
+	"github.com/AAAYNMMM/CWapi/internal/config"
 	"github.com/AAAYNMMM/CWapi/internal/state"
 )
 
@@ -28,7 +28,7 @@ func TestProductionServiceUsesMCPOnlyRuntime(t *testing.T) {
 	if service.gateway == nil || service.codexHost == nil || service.slack == nil {
 		t.Fatalf("MCP runtime not initialized: %#v", service)
 	}
-	if stage := service.RuntimeSnapshot().Stage; stage != "S2.4" {
+	if stage := service.RuntimeSnapshot().Stage; stage != "v1.6.1" {
 		t.Fatalf("runtime stage=%q", stage)
 	}
 }
@@ -36,15 +36,59 @@ func TestProductionServiceUsesMCPOnlyRuntime(t *testing.T) {
 func TestDesktopSnapshotUsesGoOwnedMCPState(t *testing.T) {
 	ctx := context.Background()
 	service := newDesktopWorkflowTestService(t)
+	service.recordOperationalError("desktop", "snapshot.test", context.Canceled)
 	snapshot, err := service.DesktopSnapshot(ctx, 50)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.Runtime.Stage != "S2.4" {
+	if snapshot.Runtime.Stage != "v1.6.1" {
 		t.Fatalf("runtime stage=%q", snapshot.Runtime.Stage)
 	}
-	if snapshot.Config.Schema == "" || snapshot.Observability.StatePath == "" {
+	if snapshot.Config.Schema == "" || len(snapshot.Components) == 0 || snapshot.Processes == nil {
 		t.Fatalf("desktop snapshot missing authoritative MCP state: %#v", snapshot)
+	}
+	if snapshot.LatestRuntimeError == nil || snapshot.LatestRuntimeError.Level != "error" || snapshot.LatestRuntimeError.Component != "desktop" {
+		t.Fatalf("desktop snapshot missing latest runtime error: %#v", snapshot.LatestRuntimeError)
+	}
+}
+
+func TestDesktopSnapshotOmitsRoutineRuntimeInfo(t *testing.T) {
+	service := newDesktopWorkflowTestService(t)
+	service.runtimeInfo("slack", "socket.ready", map[string]any{"attempt": 1})
+	snapshot, err := service.DesktopSnapshot(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.LatestRuntimeError != nil {
+		t.Fatalf("routine runtime info leaked into compact GUI: %#v", snapshot.LatestRuntimeError)
+	}
+}
+
+func TestServiceStartupPersistsSafePermissionMode(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(root, "config", "cwapi.json")
+	statePath := filepath.Join(root, "state", "cwapi.db")
+	seed := config.Default()
+	seed.PermissionMode = config.PermissionModeFullAccess
+	seed.Slack.ChannelID = "C0123456789"
+	if err := config.SaveAtomic(configPath, seed); err != nil {
+		t.Fatal(err)
+	}
+
+	service, err := NewServiceWithPaths(configPath, statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	if mode := service.ConfigSnapshot().PermissionMode; mode != config.PermissionModeSafe {
+		t.Fatalf("runtime permission mode=%q", mode)
+	}
+	persisted, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.PermissionMode != config.PermissionModeSafe || persisted.Slack.ChannelID != seed.Slack.ChannelID {
+		t.Fatalf("startup config=%#v", persisted)
 	}
 }
 
@@ -80,65 +124,15 @@ func TestServiceStartupDoesNotLoadPreviousRuntimeSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer service.Close()
-	snapshot, err := service.DesktopSnapshot(ctx, 50)
+	requests, err := service.RecentMCPRequests(ctx, 50)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.MCPRequests) != 0 || len(snapshot.Observability.StructuredExecution) != 0 {
-		t.Fatalf("previous runtime session loaded: requests=%#v events=%#v", snapshot.MCPRequests, snapshot.Observability.StructuredExecution)
+	observability := service.ObservabilitySnapshot()
+	if len(requests) != 0 || len(observability.StructuredExecution) != 0 {
+		t.Fatalf("previous runtime session loaded: requests=%#v events=%#v", requests, observability.StructuredExecution)
 	}
 	if _, found, err := service.state.Metadata(ctx, slackCursorKey); err != nil || found {
 		t.Fatalf("previous Slack cursor loaded: found=%v err=%v", found, err)
-	}
-}
-
-func TestDiagnosticsAndPersistentErrorResolutionStayAuthoritative(t *testing.T) {
-	ctx := context.Background()
-	service := newDesktopWorkflowTestService(t)
-	service.recordOperationalError("desktop", "snapshot", errors.New("same persistent failure"))
-	service.recordOperationalError("desktop", "snapshot", errors.New("same persistent failure"))
-
-	before := service.ObservabilitySnapshot()
-	if len(before.Errors) != 1 || !before.Errors[0].Active || before.Errors[0].Count != 2 {
-		t.Fatalf("before resolve=%#v", before.Errors)
-	}
-	fingerprint := before.Errors[0].Fingerprint
-	resolved, err := service.ResolveDesktopError(ctx, fingerprint)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(resolved.Errors) != 1 || resolved.Errors[0].Active || resolved.Errors[0].Count != 2 {
-		t.Fatalf("resolved snapshot=%#v", resolved.Errors)
-	}
-	persisted, err := service.state.ErrorAggregate(ctx, fingerprint)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if persisted.Active {
-		t.Fatalf("persistent error still active=%#v", persisted)
-	}
-
-	diagnostics, err := service.DiagnosticsSnapshot(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if diagnostics.Stage != "S2.4" || diagnostics.StateSchema != "3" {
-		t.Fatalf("diagnostics=%#v", diagnostics)
-	}
-	if diagnostics.ConfigPath != service.config.Path() || diagnostics.StatePath != service.state.Path() {
-		t.Fatalf("diagnostic paths=%#v", diagnostics)
-	}
-	foundDesktop := false
-	foundRelay := false
-	for _, component := range diagnostics.Components {
-		if component.Name == "desktop" && component.State == "healthy" {
-			foundDesktop = true
-		}
-		if component.Name == "mcp-relay" && component.State == "healthy" {
-			foundRelay = true
-		}
-	}
-	if !foundDesktop || !foundRelay {
-		t.Fatalf("expected desktop and MCP relay components: %#v", diagnostics.Components)
 	}
 }

@@ -16,7 +16,6 @@ type CodexSnapshot struct {
 	ExecutablePath   string `json:"executable_path"`
 	ExecutableSHA256 string `json:"executable_sha256"`
 	BrowserMCPReady  bool   `json:"browser_mcp_ready"`
-	ProcessMCPReady  bool   `json:"process_mcp_ready"`
 	NodePath         string `json:"node_path"`
 	BrowserPath      string `json:"browser_path"`
 }
@@ -82,7 +81,6 @@ func codexSnapshotFromHost(value codex.MCPHostSnapshot) CodexSnapshot {
 		ExecutablePath:   value.Runtime.ExecutablePath,
 		ExecutableSHA256: value.Runtime.ExecutableSHA,
 		BrowserMCPReady:  value.Runtime.MCPReady,
-		ProcessMCPReady:  value.Runtime.ProcessMCPReady,
 		NodePath:         value.Runtime.NodePath,
 		BrowserPath:      value.Runtime.BrowserPath,
 	}

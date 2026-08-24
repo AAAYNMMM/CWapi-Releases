@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	slackcore "github.com/AAAYNMMM/CWapi/internal/slack"
@@ -67,8 +68,32 @@ func slackMessageSnapshot(message slackcore.Message) SlackMessageSnapshot {
 		MessageTS: message.MessageTS,
 		ThreadTS:  message.ThreadTS,
 		Subject:   message.Subject,
-		Body:      message.Body,
+		Body:      publicSlackProtocolBody(message.Subject, message.Body),
 		BotID:     message.BotID,
 		UserID:    message.UserID,
 	}
+}
+
+func publicSlackProtocolBody(subject, body string) string {
+	if !strings.HasPrefix(subject, "[CWapi/MCP/2]") {
+		return body
+	}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		return body
+	}
+	raw, ok := envelope["system_token"]
+	if !ok {
+		return body
+	}
+	var token string
+	if err := json.Unmarshal(raw, &token); err != nil || token == "" {
+		return body
+	}
+	envelope["system_token"] = json.RawMessage(`"[REDACTED]"`)
+	redacted, err := json.Marshal(envelope)
+	if err != nil {
+		return body
+	}
+	return string(redacted)
 }

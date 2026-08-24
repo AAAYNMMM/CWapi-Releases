@@ -43,10 +43,7 @@ func TestStockCodexPermissionProfilesRuntime(t *testing.T) {
 		home:        filepath.Join(dataRoot, "state", "codex-home"),
 		stderrLog:   filepath.Join(dataRoot, "logs", "codex-app-server.log"),
 	}
-	permission := PermissionConfig{
-		ProfileID:    PermissionProfileSafe,
-		ProjectPaths: []string{projectRoot},
-	}
+	permission := PermissionConfig{ProfileID: PermissionProfileSafe}
 	if err := service.ensureHome(permission); err != nil {
 		t.Fatalf("generate CWapi Codex home: %v", err)
 	}

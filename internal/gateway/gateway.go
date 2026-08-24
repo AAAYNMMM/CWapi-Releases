@@ -8,6 +8,7 @@ import (
 
 	"github.com/AAAYNMMM/CWapi/internal/config"
 	"github.com/AAAYNMMM/CWapi/internal/observability"
+	"github.com/AAAYNMMM/CWapi/internal/processcontract"
 	"github.com/AAAYNMMM/CWapi/internal/protocol"
 	slackcore "github.com/AAAYNMMM/CWapi/internal/slack"
 	"github.com/AAAYNMMM/CWapi/internal/state"
@@ -39,7 +40,7 @@ type UploadedFile struct {
 }
 
 type MCPExecutionContext struct {
-	ProjectID      string
+	RepositoryURL  string
 	ExpectedCommit string
 	Repository     string
 	CWD            string
@@ -53,9 +54,17 @@ type MCPToolhost interface {
 	CallMCP(context.Context, string, map[string]any, time.Duration, MCPExecutionContext) (any, error)
 }
 
+type MCPProcessRuntime interface {
+	Start(context.Context, protocol.MCPRequest, processcontract.StartArguments, MCPExecutionContext, func()) (protocol.MCPResponse, bool)
+	Status(context.Context, string, string) protocol.MCPResponse
+	Stop(context.Context, string, string) protocol.MCPResponse
+	RevokeSystemToken(string)
+}
+
 type MCPRuntime struct {
 	Toolhost        MCPToolhost
 	ContextResolver MCPContextResolver
+	Process         MCPProcessRuntime
 }
 
 type Gateway struct {
@@ -76,7 +85,7 @@ func NewMCP(provider ConfigProvider, store *state.Store, poster SlackPoster, log
 }
 
 func (g *Gateway) AttachMCPRuntime(runtime MCPRuntime) error {
-	if runtime.Toolhost == nil {
+	if runtime.Toolhost == nil && runtime.Process == nil {
 		return errors.New("MCP_RUNTIME_INVALID")
 	}
 	g.mcpMu.Lock()
@@ -87,7 +96,7 @@ func (g *Gateway) AttachMCPRuntime(runtime MCPRuntime) error {
 
 func (g *Gateway) MCPRuntimeReady() bool {
 	g.mcpMu.RLock()
-	ready := g.mcpRuntime.Toolhost != nil
+	ready := g.mcpRuntime.Toolhost != nil || g.mcpRuntime.Process != nil
 	g.mcpMu.RUnlock()
 	return ready
 }

@@ -9,7 +9,7 @@ import (
 	"github.com/AAAYNMMM/CWapi/internal/observability"
 )
 
-func TestServiceObservabilitySnapshotSeparatesStreamsAndAggregatesErrors(t *testing.T) {
+func TestServiceObservabilitySnapshotSeparatesStreamsAndLogsErrors(t *testing.T) {
 	root := t.TempDir()
 	service, err := NewServiceWithPaths(
 		filepath.Join(root, "config", "cwapi.json"),
@@ -59,7 +59,13 @@ func TestServiceObservabilitySnapshotSeparatesStreamsAndAggregatesErrors(t *test
 	if !foundRuntime {
 		t.Fatalf("runtime log missing: %#v", snapshot.RuntimeLogs)
 	}
-	if len(snapshot.Errors) != 1 || snapshot.Errors[0].Count != 2 || !snapshot.Errors[0].Active {
-		t.Fatalf("error aggregation mismatch: %#v", snapshot.Errors)
+	errorCount := 0
+	for _, record := range snapshot.RuntimeLogs {
+		if record.Level == "error" && record.Message == "snapshot: same persistent failure" && record.Fingerprint != "" {
+			errorCount++
+		}
+	}
+	if errorCount != 2 {
+		t.Fatalf("operational errors missing from runtime log: %#v", snapshot.RuntimeLogs)
 	}
 }

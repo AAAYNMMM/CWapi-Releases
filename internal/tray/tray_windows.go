@@ -10,6 +10,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/AAAYNMMM/CWapi/internal/buildinfo"
 	"golang.org/x/sys/windows"
 )
 
@@ -260,7 +261,7 @@ func (w *windowsImplementation) run() {
 		UCallbackMessage: wmTrayIcon,
 		HIcon:            icon,
 	}
-	setUTF16(nid.SzTip[:], "CWapi v1.6.0")
+	setUTF16(nid.SzTip[:], "CWapi v"+buildinfo.Version)
 	added, _, callErr := procShellNotifyIconW.Call(nimAdd, uintptr(unsafe.Pointer(&nid)))
 	if added == 0 {
 		_ = w.destroyWindow(hwnd)

@@ -2,12 +2,10 @@
 
 package codex
 
-type processScope struct{}
+import "github.com/AAAYNMMM/CWapi/internal/processscope"
 
-func attachProcessScope(int) (*processScope, error) {
-	return &processScope{}, nil
-}
+type processScope = processscope.Scope
 
-func (s *processScope) Close() error {
-	return nil
+func attachProcessScope(pid int) (*processScope, error) {
+	return processscope.Attach(pid)
 }

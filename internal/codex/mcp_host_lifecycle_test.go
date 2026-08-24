@@ -88,7 +88,7 @@ func seededMCPHost(t *testing.T, provider func() PermissionConfig, client *fakeM
 	return host
 }
 
-func TestMCPHostReusesExactWorktreeThreadAcrossCalls(t *testing.T) {
+func TestMCPHostUsesRequestUniqueWorktreeThreads(t *testing.T) {
 	permission := PermissionConfig{ProfileID: PermissionProfileSafe}
 	client := newFakeMCPHostClient()
 	host := seededMCPHost(t, func() PermissionConfig { return permission }, client)
@@ -105,10 +105,10 @@ func TestMCPHostReusesExactWorktreeThreadAcrossCalls(t *testing.T) {
 	}
 	client.mu.Lock()
 	defer client.mu.Unlock()
-	if len(client.internalCalls) != 1 || client.internalCalls[0] != "thread/start" {
+	if got := client.internalCalls; len(got) != 4 || got[0] != "thread/start" || got[1] != "thread/unsubscribe" || got[2] != "thread/start" || got[3] != "thread/unsubscribe" {
 		t.Fatalf("unexpected thread lifecycle: %#v", client.internalCalls)
 	}
-	if len(client.mcpThreadIDs) != 2 || client.mcpThreadIDs[0] != "thread-1" || client.mcpThreadIDs[1] != "thread-1" {
+	if len(client.mcpThreadIDs) != 2 || client.mcpThreadIDs[0] != "thread-1" || client.mcpThreadIDs[1] != "thread-2" {
 		t.Fatalf("unexpected MCP thread IDs: %#v", client.mcpThreadIDs)
 	}
 }
@@ -128,7 +128,7 @@ func TestMCPHostKeepsExactWorktreeThreadsIsolated(t *testing.T) {
 	}
 	client.mu.Lock()
 	defer client.mu.Unlock()
-	if got := client.mcpThreadIDs; len(got) != 3 || got[0] != "thread-1" || got[1] != "thread-2" || got[2] != "thread-1" {
+	if got := client.mcpThreadIDs; len(got) != 3 || got[0] != "thread-1" || got[1] != "thread-2" || got[2] != "thread-3" {
 		t.Fatalf("worktree thread IDs = %#v", got)
 	}
 }

@@ -1,0 +1,80 @@
+{
+  "schema": "cwapi.slack-mcp-e2e.expectations.v2",
+  "requests": [
+    {
+      "request_id": "CW161STATUSLIST01",
+      "method": "mcpServerStatus/list",
+      "status": "completed",
+      "result_text_not_contains": "\"name\":\"cwapi\""
+    },
+    {
+      "request_id": "CW161CODEXSUCCESS01",
+      "method": "mcpServer/tool/call",
+      "server": "cwapi",
+      "tool_name": "process_start",
+      "repository_url": "https://github.com/OWNER/REPOSITORY",
+      "require_exact_commit": true,
+      "status": "completed",
+      "process_state": "completed",
+      "backend": "codex",
+      "require_process_id": true,
+      "result_text_contains": "CODEX_OK"
+    },
+    {
+      "request_id": "CW161DENIALTOKEN01",
+      "method": "mcpServer/tool/call",
+      "server": "cwapi",
+      "tool_name": "process_start",
+      "repository_url": "https://github.com/OWNER/REPOSITORY",
+      "require_exact_commit": true,
+      "status": "blocked",
+      "error_code": "PERMISSION_DENIED",
+      "require_system_token": true
+    },
+    {
+      "request_id": "CW161SYSTEMFALLBACK01",
+      "method": "mcpServer/tool/call",
+      "server": "cwapi",
+      "tool_name": "process_start",
+      "repository_url": "https://github.com/OWNER/REPOSITORY",
+      "require_exact_commit": true,
+      "status": "completed",
+      "process_state": "completed",
+      "backend": "system",
+      "require_process_id": true,
+      "result_text_contains": "SYSTEM_OK"
+    },
+    {
+      "request_id": "CW161LONGSTART01",
+      "method": "mcpServer/tool/call",
+      "server": "cwapi",
+      "tool_name": "process_start",
+      "repository_url": "https://github.com/OWNER/REPOSITORY",
+      "require_exact_commit": true,
+      "status": "completed",
+      "process_state": "running",
+      "backend": "codex",
+      "require_process_id": true
+    },
+    {
+      "request_id": "CW161LONGSTATUS01",
+      "method": "mcpServer/tool/call",
+      "server": "cwapi",
+      "tool_name": "process_status",
+      "status": "completed",
+      "process_state": "running",
+      "backend": "codex",
+      "require_process_id": true
+    },
+    {
+      "request_id": "CW161LONGSTOP01",
+      "method": "mcpServer/tool/call",
+      "server": "cwapi",
+      "tool_name": "process_stop",
+      "status": "completed",
+      "process_state": "stopped",
+      "backend": "codex",
+      "require_process_id": true
+    }
+  ]
+}

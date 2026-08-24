@@ -8,8 +8,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
+
+	"github.com/AAAYNMMM/CWapi/internal/executionpolicy"
 )
 
 const (
@@ -27,14 +28,13 @@ type Service struct {
 }
 
 type RuntimeSnapshot struct {
-	Configured      bool   `json:"configured"`
-	Version         string `json:"version"`
-	ExecutablePath  string `json:"executable_path"`
-	ExecutableSHA   string `json:"executable_sha256,omitempty"`
-	MCPReady        bool   `json:"mcp_ready"`
-	ProcessMCPReady bool   `json:"process_mcp_ready"`
-	NodePath        string `json:"node_path,omitempty"`
-	BrowserPath     string `json:"browser_path,omitempty"`
+	Configured     bool   `json:"configured"`
+	Version        string `json:"version"`
+	ExecutablePath string `json:"executable_path"`
+	ExecutableSHA  string `json:"executable_sha256,omitempty"`
+	MCPReady       bool   `json:"mcp_ready"`
+	NodePath       string `json:"node_path,omitempty"`
+	BrowserPath    string `json:"browser_path,omitempty"`
 }
 
 func NewService(dataRoot string) (*Service, error) {
@@ -46,7 +46,7 @@ func NewService(dataRoot string) (*Service, error) {
 		return nil, fmt.Errorf("CODEX_INSTALL_ROOT_RESOLVE_FAILED: %w", err)
 	}
 	installRoot := filepath.Dir(executable)
-	return newService(dataRoot, installRoot), nil
+	return NewServiceWithInstallRoot(dataRoot, installRoot)
 }
 
 func newService(dataRoot, installRoot string) *Service {
@@ -73,9 +73,6 @@ func (s *Service) Snapshot() RuntimeSnapshot {
 		value.NodePath = node
 		value.BrowserPath = browser
 	}
-	if fileExists(node) && fileExists(s.processMCPPath()) && fileExists(s.processMCPInvocationPath()) && fileExists(s.processMCPOutputPath()) {
-		value.ProcessMCPReady = true
-	}
 	return value
 }
 
@@ -84,24 +81,20 @@ func (s *Service) ensureHome(permission PermissionConfig) error {
 	if err != nil {
 		return err
 	}
-	if err := validateProjectRootsAgainstPermanentDenies(permission, s.dataRoot); err != nil {
-		return err
-	}
 	if err := os.MkdirAll(s.home, 0o700); err != nil {
 		return fmt.Errorf("CODEX_HOME_CREATE_FAILED: %w", err)
 	}
 	node, cli, browser := s.mcpPaths()
-	processServer := s.processMCPPath()
 	browserOutput := filepath.Join(s.dataRoot, "logs", "browser")
-	processOutput := filepath.Join(s.dataRoot, "logs", "processes")
 	temp := filepath.Join(s.dataRoot, "temp", "codex")
+	globalRoot := filepath.Join(s.dataRoot, "temp", "mcp-global")
 	if err := os.MkdirAll(browserOutput, 0o700); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(processOutput, 0o700); err != nil {
+	if err := os.MkdirAll(temp, 0o700); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(temp, 0o700); err != nil {
+	if err := os.MkdirAll(globalRoot, 0o700); err != nil {
 		return err
 	}
 	if err := s.writeBaseExecPolicy(); err != nil {
@@ -110,29 +103,21 @@ func (s *Service) ensureHome(permission PermissionConfig) error {
 
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "approval_policy = \"never\"\ndefault_permissions = %s\n", tomlString(permission.ProfileID))
+	builder.WriteString("\n[windows]\nsandbox = \"unelevated\"\n")
 	builder.WriteString("\n[permissions.cwapi-safe]\n")
-	builder.WriteString("description = \"CWapi safe: configured projects and CWapi data only\"\n")
+	builder.WriteString("description = \"CWapi safe: current execution root and global MCP root only\"\n")
 	builder.WriteString("extends = \":workspace\"\n")
 	builder.WriteString("\n[permissions.cwapi-safe.workspace_roots]\n")
-	for _, root := range permission.ProjectPaths {
-		fmt.Fprintf(&builder, "%s = true\n", tomlString(root))
-	}
+	fmt.Fprintf(&builder, "%s = true\n", tomlString(globalRoot))
 	builder.WriteString("\n[permissions.cwapi-safe.network]\nenabled = true\n")
 
 	builder.WriteString("\n[permissions.cwapi-full-access]\n")
 	builder.WriteString("description = \"CWapi full disk access with permanent base-layer protection\"\n")
 	builder.WriteString("\n[permissions.cwapi-full-access.filesystem]\n\":root\" = \"write\"\n")
-	for _, protected := range baseProtectedPaths() {
+	for _, protected := range executionpolicy.ProtectedFilesystemRoots() {
 		fmt.Fprintf(&builder, "%s = \"deny\"\n", tomlString(protected))
 	}
-	// Configured projects and CWapi data are explicit exceptions to the broad
-	// user-profile deny. System paths and Downloads are never reopened.
-	for _, root := range permission.ProjectPaths {
-		fmt.Fprintf(&builder, "%s = \"write\"\n", tomlString(root))
-		for _, metadata := range []string{".git", ".agents", ".codex"} {
-			fmt.Fprintf(&builder, "%s = \"deny\"\n", tomlString(filepath.Join(root, metadata)))
-		}
-	}
+	fmt.Fprintf(&builder, "%s = \"write\"\n", tomlString(globalRoot))
 	builder.WriteString("\n[permissions.cwapi-full-access.network]\nenabled = true\n")
 
 	if fileExists(node) && fileExists(cli) && fileExists(browser) {
@@ -144,119 +129,19 @@ func (s *Service) ensureHome(permission PermissionConfig) error {
 			tomlString(os.Getenv("USERPROFILE")), tomlString(temp), tomlString(temp), tomlString(filepath.Dir(filepath.Dir(browser))),
 		)
 	}
-	if fileExists(node) && fileExists(processServer) && fileExists(s.processMCPInvocationPath()) && fileExists(s.processMCPOutputPath()) {
-		fmt.Fprintf(
-			&builder,
-			"\n[mcp_servers.cwapi]\ncommand = %s\nargs = [%s]\nstartup_timeout_ms = 10000\ntool_timeout_sec = 30\nenabled = true\n\n[mcp_servers.cwapi.env]\nSystemRoot = %s\nWINDIR = %s\nPATH = %s\nTEMP = %s\nTMP = %s\nCWAPI_PROCESS_LOG_ROOT = %s\n",
-			tomlString(node), tomlString(processServer), tomlString(os.Getenv("SystemRoot")),
-			tomlString(os.Getenv("WINDIR")), tomlString(os.Getenv("PATH")), tomlString(temp),
-			tomlString(temp), tomlString(processOutput),
-		)
-	}
-
 	return writeAtomic(filepath.Join(s.home, "config.toml"), []byte(builder.String()), 0o600)
 }
 
 func (s *Service) writeBaseExecPolicy() error {
-	rulesDir := filepath.Join(s.home, "rules")
+	return writeBaseExecPolicyAt(s.home)
+}
+
+func writeBaseExecPolicyAt(home string) error {
+	rulesDir := filepath.Join(home, "rules")
 	if err := os.MkdirAll(rulesDir, 0o700); err != nil {
 		return fmt.Errorf("CODEX_RULES_DIR_CREATE_FAILED: %w", err)
 	}
-	const rules = `# CWapi permanent base safety rules. These are loaded by stock Codex execpolicy.
-prefix_rule(pattern=["format"], decision="forbidden", justification="CWapi never permits filesystem formatting.")
-prefix_rule(pattern=["format.com"], decision="forbidden", justification="CWapi never permits filesystem formatting.")
-prefix_rule(pattern=["diskpart"], decision="forbidden", justification="CWapi never permits disk partition mutation.")
-prefix_rule(pattern=["diskpart.exe"], decision="forbidden", justification="CWapi never permits disk partition mutation.")
-prefix_rule(pattern=["bcdedit"], decision="forbidden", justification="CWapi does not modify system boot configuration.")
-prefix_rule(pattern=["bcdedit.exe"], decision="forbidden", justification="CWapi does not modify system boot configuration.")
-prefix_rule(pattern=["regedit"], decision="forbidden", justification="CWapi does not expose system registry mutation as a generic execution path.")
-prefix_rule(pattern=["regedit.exe"], decision="forbidden", justification="CWapi does not expose system registry mutation as a generic execution path.")
-prefix_rule(pattern=["taskkill"], decision="forbidden", justification="Generic process termination is forbidden; typed CWapi process lifecycle owns project shutdown.")
-prefix_rule(pattern=["taskkill.exe"], decision="forbidden", justification="Generic process termination is forbidden; typed CWapi process lifecycle owns project shutdown.")
-prefix_rule(pattern=["Stop-Process"], decision="forbidden", justification="Generic process termination is forbidden; typed CWapi process lifecycle owns project shutdown.")
-prefix_rule(pattern=["git", "add"], decision="forbidden", justification="MCP execution cannot stage repository changes.")
-prefix_rule(pattern=["git", "commit"], decision="forbidden", justification="MCP execution cannot create commits.")
-prefix_rule(pattern=["git", "checkout"], decision="forbidden", justification="CWapi owns the exact-commit workspace.")
-prefix_rule(pattern=["git", "switch"], decision="forbidden", justification="CWapi owns the exact-commit workspace.")
-prefix_rule(pattern=["git", "restore"], decision="forbidden", justification="MCP execution cannot mutate tracked files through Git.")
-prefix_rule(pattern=["git", "reset"], decision="forbidden", justification="MCP execution cannot reset repository state or history.")
-prefix_rule(pattern=["git", "clean"], decision="forbidden", justification="MCP execution cannot delete untracked repository content.")
-prefix_rule(pattern=["git", "merge"], decision="forbidden", justification="MCP execution cannot mutate repository history.")
-prefix_rule(pattern=["git", "rebase"], decision="forbidden", justification="MCP execution cannot rewrite repository history.")
-prefix_rule(pattern=["git", "cherry-pick"], decision="forbidden", justification="MCP execution cannot mutate repository history.")
-prefix_rule(pattern=["git", "revert"], decision="forbidden", justification="MCP execution cannot create history mutations.")
-prefix_rule(pattern=["git", "filter-branch"], decision="forbidden", justification="CWapi never permits Git history rewriting through MCP.")
-prefix_rule(pattern=["git", "push"], decision="forbidden", justification="MCP execution cannot mutate remotes.")
-prefix_rule(pattern=["git", "pull"], decision="forbidden", justification="CWapi owns exact-commit synchronization.")
-prefix_rule(pattern=["git", "fetch"], decision="forbidden", justification="CWapi owns exact-commit synchronization.")
-prefix_rule(pattern=["git", "branch", ["-d", "-D", "--delete", "-m", "-M", "--move", "-c", "-C", "--copy"]], decision="forbidden", justification="MCP execution cannot mutate local branches.")
-prefix_rule(pattern=["git", "tag", ["-d", "--delete", "-f", "--force", "-a", "-s", "-u"]], decision="forbidden", justification="MCP execution cannot create, delete, or rewrite tags.")
-`
-	return writeAtomic(filepath.Join(rulesDir, "default.rules"), []byte(rules), 0o600)
-}
-
-func baseProtectedPaths() []string {
-	userProfile := strings.TrimSpace(os.Getenv("USERPROFILE"))
-	candidates := []string{
-		os.Getenv("SystemRoot"),
-		os.Getenv("ProgramFiles"),
-		os.Getenv("ProgramFiles(x86)"),
-		userProfile,
-		os.Getenv("HOME"),
-	}
-	if userProfile != "" {
-		candidates = append(candidates, filepath.Join(userProfile, "Downloads"))
-	}
-	return canonicalPathSet(candidates)
-}
-
-func nonOverridableBasePaths() []string {
-	userProfile := strings.TrimSpace(os.Getenv("USERPROFILE"))
-	candidates := []string{
-		os.Getenv("SystemRoot"),
-		os.Getenv("ProgramFiles"),
-		os.Getenv("ProgramFiles(x86)"),
-	}
-	if userProfile != "" {
-		candidates = append(candidates, filepath.Join(userProfile, "Downloads"))
-	}
-	return canonicalPathSet(candidates)
-}
-
-func canonicalPathSet(candidates []string) []string {
-	seen := map[string]struct{}{}
-	paths := make([]string, 0, len(candidates))
-	for _, value := range candidates {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		cleaned := filepath.Clean(value)
-		key := strings.ToLower(cleaned)
-		if _, exists := seen[key]; exists {
-			continue
-		}
-		seen[key] = struct{}{}
-		paths = append(paths, cleaned)
-	}
-	sort.Slice(paths, func(i, j int) bool { return strings.ToLower(paths[i]) < strings.ToLower(paths[j]) })
-	return paths
-}
-
-func validateProjectRootsAgainstPermanentDenies(permission PermissionConfig, dataRoot string) error {
-	dataRoot = filepath.Clean(dataRoot)
-	protected := nonOverridableBasePaths()
-	for _, root := range permission.ProjectPaths {
-		if strings.EqualFold(filepath.Clean(root), dataRoot) {
-			continue
-		}
-		for _, deny := range protected {
-			if pathWithin(root, deny) {
-				return fmt.Errorf("CODEX_PROJECT_PATH_BASE_PROTECTED: %s", root)
-			}
-		}
-	}
-	return nil
+	return writeAtomic(filepath.Join(rulesDir, "default.rules"), []byte(executionpolicy.CodexRules()), 0o600)
 }
 
 func pathWithin(path, root string) bool {
@@ -289,18 +174,6 @@ func (s *Service) mcpPaths() (string, string, string) {
 	cli := filepath.Join(s.installRoot, "runtime", "mcp", "playwright", "node_modules", "@playwright", "mcp", "cli.js")
 	browser := filepath.Join(s.installRoot, "runtime", "browser", "chromium_headless_shell-1237", "chrome-headless-shell-win64", "chrome-headless-shell.exe")
 	return node, cli, browser
-}
-
-func (s *Service) processMCPPath() string {
-	return filepath.Join(s.installRoot, "runtime", "mcp", "cwapi", "process-server.cjs")
-}
-
-func (s *Service) processMCPOutputPath() string {
-	return filepath.Join(s.installRoot, "runtime", "mcp", "cwapi", "process-output.cjs")
-}
-
-func (s *Service) processMCPInvocationPath() string {
-	return filepath.Join(s.installRoot, "runtime", "mcp", "cwapi", "process-invocation.cjs")
 }
 
 func toml(value string) string {

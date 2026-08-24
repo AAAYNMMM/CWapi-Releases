@@ -64,7 +64,15 @@ func (h *MCPHost) CallMCP(ctx context.Context, call MCPCall) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer lease.release()
+	repositoryContext := strings.TrimSpace(call.CWD) != ""
+	defer func() {
+		if repositoryContext && lease.generation.client.Alive() {
+			unsubscribeCtx, unsubscribeCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			_ = unsubscribeMCPContextThread(unsubscribeCtx, lease.generation.client, lease.threadID)
+			unsubscribeCancel()
+		}
+		lease.release()
+	}()
 	params["threadId"] = lease.threadID
 	value, err := lease.generation.client.RequestMCP(callCtx, method, params)
 	if err != nil {
@@ -95,6 +103,7 @@ func (h *MCPHost) clientAndThread(ctx context.Context, requestedCWD string) (*mc
 		return nil, err
 	}
 	threadKey := strings.ToLower(targetCWD)
+	requestUniqueThread := strings.TrimSpace(requestedCWD) != ""
 
 	for {
 		h.mu.Lock()
@@ -129,7 +138,10 @@ func (h *MCPHost) clientAndThread(ctx context.Context, requestedCWD string) (*mc
 			h.generation = generation
 		}
 
-		threadID := generation.threads[threadKey]
+		threadID := ""
+		if !requestUniqueThread {
+			threadID = generation.threads[threadKey]
+		}
 		if threadID == "" {
 			startCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			threadID, err = startMCPContextThread(startCtx, generation.client, canonicalPermission.ProfileID, targetCWD)
@@ -148,10 +160,12 @@ func (h *MCPHost) clientAndThread(ctx context.Context, requestedCWD string) (*mc
 				}
 				return nil, err
 			}
-			if generation.threads == nil {
-				generation.threads = make(map[string]string)
+			if !requestUniqueThread {
+				if generation.threads == nil {
+					generation.threads = make(map[string]string)
+				}
+				generation.threads[threadKey] = threadID
 			}
-			generation.threads[threadKey] = threadID
 		}
 		if generation.active == 0 {
 			generation.idle = make(chan struct{})

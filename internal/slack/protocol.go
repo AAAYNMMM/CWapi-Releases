@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	MCPProtocolPrefix = "[CWapi/MCP/1]"
+	MCPProtocolPrefix = "[CWapi/MCP/2]"
 	protocolFrame     = "+++"
 	maxProtocolBytes  = 64 * 1024
 )
@@ -89,12 +89,14 @@ func DecodeProtocol(text string) (subject, body string, ok bool) {
 // IsProtocolCandidate identifies caller text that was intended for CWapi but
 // cannot be decoded as a complete frame. Ordinary channel conversation remains
 // ignored; malformed CWapi requests are surfaced so the app can reply with the
-// current protocol and project discovery instructions.
+// current v2 protocol instructions.
 func IsProtocolCandidate(text string) bool {
 	normalized := strings.ToLower(text)
 	return strings.Contains(normalized, "[cwapi/") ||
 		strings.Contains(normalized, "cwapi.mcp.request.v1") ||
-		strings.Contains(normalized, "cwapi-mcp/1")
+		strings.Contains(normalized, "cwapi.mcp.request.v2") ||
+		strings.Contains(normalized, "cwapi-mcp/1") ||
+		strings.Contains(normalized, "cwapi-mcp/2")
 }
 
 // Slack integrations may append attribution metadata after the user's text.

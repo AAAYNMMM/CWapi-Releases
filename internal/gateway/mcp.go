@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AAAYNMMM/CWapi/internal/processcontract"
 	"github.com/AAAYNMMM/CWapi/internal/protocol"
 	slackcore "github.com/AAAYNMMM/CWapi/internal/slack"
 	"github.com/AAAYNMMM/CWapi/internal/state"
@@ -16,16 +17,15 @@ import (
 const mcpRelayTimeout = 120 * time.Second
 
 var allowedCodexMCPMethods = map[string]struct{}{
-	"projects/list":           {},
-	"mcpServerStatus/list":    {},
-	"mcpServer/resource/read": {},
-	"mcpServer/tool/call":     {},
+	protocol.MCPMethodStatusList:   {},
+	protocol.MCPMethodResourceRead: {},
+	protocol.MCPMethodToolCall:     {},
 }
 
 func (g *Gateway) handleMCPMessage(ctx context.Context, message slackcore.Message, subject protocol.MCPSubject) error {
 	if subject.Family != protocol.MCPFamilyRequest {
 		return g.postTransientMCPError(ctx, message, subject.RequestID, protocol.MCPStatusFailed,
-			"MCP_REQUEST_FAMILY_REQUIRED", "protocol", "CWapi accepts MCP_REQUEST messages from callers. Send method=projects/list with params={} to discover project_id and usage.")
+			"MCP_REQUEST_FAMILY_REQUIRED", "protocol", "CWapi accepts MCP_REQUEST messages from callers using [CWapi/MCP/2].")
 	}
 	return g.handleMCPRequest(ctx, message, subject)
 }
@@ -34,12 +34,20 @@ func (g *Gateway) handleMCPRequest(ctx context.Context, message slackcore.Messag
 	startedAt := nowMillis()
 	request, err := protocol.DecodeMCPRequest([]byte(message.Body))
 	if err != nil {
+		code := "MCP_REQUEST_INVALID"
+		if strings.Contains(err.Error(), "MCP_SYSTEM_TOKEN_INVALID") {
+			code = "MCP_SYSTEM_TOKEN_INVALID"
+		}
 		return g.postTransientMCPError(ctx, message, subject.RequestID, protocol.MCPStatusFailed,
-			"MCP_REQUEST_INVALID", "protocol", "MCP request validation failed. Send method=projects/list with params={} in a complete CWapi MCP v1 frame to discover project_id and usage.")
+			code, "protocol", boundedMCPText(err.Error(), 1000)+". Use a complete CWapi MCP v2 frame.")
 	}
 	if request.RequestID != subject.RequestID {
 		return g.postTransientMCPError(ctx, message, subject.RequestID, protocol.MCPStatusFailed,
 			"MCP_REQUEST_ID_MISMATCH", "protocol", "MCP subject and body request IDs do not match")
+	}
+	params, routeResponse := validateMCPRoute(request)
+	if routeResponse != nil {
+		return g.deliverMCPResponse(ctx, message, *routeResponse, false)
 	}
 	fingerprint, err := request.Fingerprint()
 	if err != nil {
@@ -85,15 +93,25 @@ func (g *Gateway) handleMCPRequest(ctx context.Context, message slackcore.Messag
 	}
 	g.emitMCPExecution(request, "request", state.MCPExecutionReceived, "MCP request accepted", startedAt, nil)
 
-	if request.ProjectID != "" {
+	processTool := virtualProcessTool(params)
+	needsRepositoryContext := request.RepositoryURL != "" && !(processTool == processToolStart && request.SystemToken != "")
+	if needsRepositoryContext {
 		if err := g.updateMCPExecution(ctx, request, state.MCPExecutionPreparing, "Preparing exact-commit workspace", startedAt); err != nil {
 			return err
 		}
 	}
-	execution, release, response := g.prepareMCPExecutionContext(ctx, request)
-	if release != nil {
-		defer release()
+	execution := MCPExecutionContext{}
+	var release func()
+	var response *protocol.MCPResponse
+	if needsRepositoryContext {
+		execution, release, response = g.prepareMCPExecutionContext(ctx, request)
 	}
+	ownedRelease := false
+	defer func() {
+		if release != nil && !ownedRelease {
+			release()
+		}
+	}()
 	if response != nil {
 		return g.completeAndDeliverMCPResponse(ctx, message, request, *response, startedAt)
 	}
@@ -101,7 +119,8 @@ func (g *Gateway) handleMCPRequest(ctx context.Context, message slackcore.Messag
 		return err
 	}
 
-	result := g.relayCodexMCP(ctx, request, execution)
+	result, owned := g.relayCodexMCP(ctx, request, execution, params, release)
+	ownedRelease = owned
 	g.emitMCPProcessState(request, result, startedAt)
 	result = g.externalizeMCPResult(ctx, message, result)
 	return g.completeAndDeliverMCPResponse(ctx, message, request, result, startedAt)
@@ -116,86 +135,82 @@ func (g *Gateway) updateMCPExecution(ctx context.Context, request protocol.MCPRe
 }
 
 func (g *Gateway) prepareMCPExecutionContext(ctx context.Context, request protocol.MCPRequest) (MCPExecutionContext, func(), *protocol.MCPResponse) {
-	if request.ProjectID == "" {
+	if request.RepositoryURL == "" {
 		return MCPExecutionContext{}, nil, nil
 	}
 	runtime := g.mcpRuntimeSnapshot()
 	if runtime.ContextResolver == nil {
 		response := mcpErrorResponse(request.RequestID, protocol.MCPStatusUnavailable,
-			"MCP_PROJECT_CONTEXT_UNAVAILABLE", "workspace", "CWapi exact-commit project context is unavailable")
+			"MCP_REPOSITORY_CONTEXT_UNAVAILABLE", "workspace", "CWapi exact-commit repository context is unavailable")
 		return MCPExecutionContext{}, nil, &response
 	}
 	execution, release, err := runtime.ContextResolver.PrepareMCPContext(
 		ctx,
 		request.RequestID,
-		request.ProjectID,
+		request.RepositoryURL,
 		request.ExpectedCommit,
 	)
 	if err != nil {
-		detail := err.Error()
-		if strings.Contains(detail, "MCP_PROJECT_NOT_FOUND") {
-			detail += ". " + g.projectDiscoverySummary()
-		}
 		response := mcpErrorResponse(request.RequestID, protocol.MCPStatusFailed,
-			"MCP_PROJECT_PREPARE_FAILED", "workspace", detail)
+			"MCP_REPOSITORY_PREPARE_FAILED", "workspace", err.Error())
 		return MCPExecutionContext{}, release, &response
 	}
-	if execution.ProjectID != request.ProjectID || !strings.EqualFold(execution.ExpectedCommit, request.ExpectedCommit) || !filepath.IsAbs(execution.CWD) {
+	if execution.RepositoryURL != request.RepositoryURL || !strings.EqualFold(execution.ExpectedCommit, request.ExpectedCommit) || !filepath.IsAbs(execution.CWD) {
 		response := mcpErrorResponse(request.RequestID, protocol.MCPStatusFailed,
-			"MCP_PROJECT_CONTEXT_MISMATCH", "workspace", "prepared workspace did not match the requested project_id and expected_commit")
+			"MCP_REPOSITORY_CONTEXT_MISMATCH", "workspace", "prepared workspace did not match repository_url and expected_commit")
 		return MCPExecutionContext{}, release, &response
 	}
 	return execution, release, nil
 }
 
-func (g *Gateway) relayCodexMCP(ctx context.Context, request protocol.MCPRequest, execution MCPExecutionContext) protocol.MCPResponse {
+func (g *Gateway) relayCodexMCP(ctx context.Context, request protocol.MCPRequest, execution MCPExecutionContext, params map[string]any, release func()) (protocol.MCPResponse, bool) {
 	method := strings.TrimSpace(request.Method)
 	if _, ok := allowedCodexMCPMethods[method]; !ok {
 		return mcpErrorResponse(request.RequestID, protocol.MCPStatusUnavailable,
-			"MCP_METHOD_UNAVAILABLE", "relay", "only stock Codex app-server MCP methods are exposed")
-	}
-	if method == "projects/list" {
-		return g.projectsListResponse(request)
+			"MCP_METHOD_UNAVAILABLE", "relay", "only stock Codex app-server MCP methods are exposed"), false
 	}
 	runtime := g.mcpRuntimeSnapshot()
-	if runtime.Toolhost == nil {
-		return mcpErrorResponse(request.RequestID, protocol.MCPStatusUnavailable,
-			"MCP_TOOLHOST_UNAVAILABLE", "toolhost", "Codex MCP relay is not attached")
-	}
-
-	params := map[string]any{}
-	if len(request.Params) > 0 && string(request.Params) != "null" {
-		if err := json.Unmarshal(request.Params, &params); err != nil {
-			return mcpErrorResponse(request.RequestID, protocol.MCPStatusFailed,
-				"MCP_PARAMS_INVALID", "protocol", "MCP params must be a JSON object")
+	if tool := virtualProcessTool(params); tool != "" {
+		if runtime.Process == nil {
+			return mcpErrorResponse(request.RequestID, protocol.MCPStatusUnavailable,
+				"MCP_PROCESS_RUNTIME_UNAVAILABLE", "process", "CWapi process runtime is not attached"), false
+		}
+		arguments, _ := params["arguments"].(map[string]any)
+		switch tool {
+		case processToolStart:
+			start, err := processcontract.DecodeStart(arguments)
+			if err != nil {
+				return mcpErrorResponse(request.RequestID, protocol.MCPStatusFailed, routeCode(err), "process", err.Error()), false
+			}
+			return runtime.Process.Start(ctx, request, start, execution, release)
+		case processToolStatus:
+			processID, _ := processcontract.DecodeProcessID(arguments)
+			return runtime.Process.Status(ctx, request.RequestID, processID), false
+		case processToolStop:
+			processID, _ := processcontract.DecodeProcessID(arguments)
+			return runtime.Process.Stop(ctx, request.RequestID, processID), false
 		}
 	}
-	if _, supplied := params["threadId"]; supplied {
-		return mcpErrorResponse(request.RequestID, protocol.MCPStatusFailed,
-			"MCP_THREAD_ID_MANAGED", "relay", "threadId is owned by CWapi")
-	}
-	if response := g.prepareCWapiProcessCall(request, execution, params); response != nil {
-		return *response
+	if runtime.Toolhost == nil {
+		return mcpErrorResponse(request.RequestID, protocol.MCPStatusUnavailable,
+			"MCP_TOOLHOST_UNAVAILABLE", "toolhost", "Codex MCP relay is not attached"), false
 	}
 
 	value, err := runtime.Toolhost.CallMCP(ctx, method, params, mcpRelayTimeout, execution)
 	if err != nil {
 		return mcpErrorResponse(request.RequestID, protocol.MCPStatusUnavailable,
-			"MCP_TOOLHOST_CALL_FAILED", "toolhost", err.Error())
+			"MCP_TOOLHOST_CALL_FAILED", "toolhost", err.Error()), false
 	}
-	if method == "mcpServerStatus/list" {
-		value = g.withCWapiDiscovery(value)
-	}
-	if method == "mcpServer/tool/call" {
+	if method == protocol.MCPMethodToolCall {
 		if message, failed := mcpToolFailure(value); failed {
 			return mcpErrorResponse(request.RequestID, protocol.MCPStatusFailed,
-				"MCP_TOOL_REPORTED_ERROR", "tool", message)
+				"MCP_TOOL_REPORTED_ERROR", "tool", message), false
 		}
 	}
 	payload, err := json.Marshal(value)
 	if err != nil {
 		return mcpErrorResponse(request.RequestID, protocol.MCPStatusFailed,
-			"MCP_RESULT_ENCODE_FAILED", "relay", "Codex MCP result could not be encoded")
+			"MCP_RESULT_ENCODE_FAILED", "relay", "Codex MCP result could not be encoded"), false
 	}
 	return protocol.MCPResponse{
 		Schema:          protocol.MCPResponseSchema,
@@ -203,7 +218,14 @@ func (g *Gateway) relayCodexMCP(ctx context.Context, request protocol.MCPRequest
 		RequestID:       request.RequestID,
 		Status:          protocol.MCPStatusCompleted,
 		Result:          payload,
+	}, false
+}
+
+func virtualProcessTool(params map[string]any) string {
+	if strings.TrimSpace(stringValue(params["server"])) != "cwapi" {
+		return ""
 	}
+	return strings.TrimSpace(stringValue(params["tool"]))
 }
 
 func mcpErrorResponse(requestID string, status protocol.MCPStatus, code, category, text string) protocol.MCPResponse {
@@ -228,12 +250,15 @@ func mcpErrorResponse(requestID string, status protocol.MCPStatus, code, categor
 func (g *Gateway) completeAndDeliverMCPResponse(ctx context.Context, message slackcore.Message, request protocol.MCPRequest, response protocol.MCPResponse, startedAt int64) error {
 	responseJSON, err := json.Marshal(response)
 	if err != nil {
+		g.revokeUndurableSystemToken(response)
 		return fmt.Errorf("MCP_RESPONSE_ENCODE_FAILED: %w", err)
 	}
 	if _, err := protocol.DecodeMCPResponse(responseJSON); err != nil {
+		g.revokeUndurableSystemToken(response)
 		return fmt.Errorf("MCP_RESPONSE_INVALID: %w", err)
 	}
 	if err := g.store.CompleteMCPRequest(ctx, response.RequestID, string(response.Status), string(responseJSON), nowMillis()); err != nil {
+		g.revokeUndurableSystemToken(response)
 		return err
 	}
 	terminalMessage := "MCP execution completed"
@@ -245,6 +270,16 @@ func (g *Gateway) completeAndDeliverMCPResponse(ctx context.Context, message sla
 	}
 	g.emitMCPExecution(request, "terminal", string(response.Status), terminalMessage, startedAt, fields)
 	return g.deliverMCPResponse(ctx, message, response, true)
+}
+
+func (g *Gateway) revokeUndurableSystemToken(response protocol.MCPResponse) {
+	if response.SystemToken == "" {
+		return
+	}
+	runtime := g.mcpRuntimeSnapshot()
+	if runtime.Process != nil {
+		runtime.Process.RevokeSystemToken(response.SystemToken)
+	}
 }
 
 func (g *Gateway) deliverStoredMCPResponse(ctx context.Context, message slackcore.Message, record state.MCPRequestRecord) error {

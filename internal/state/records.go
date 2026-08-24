@@ -2,7 +2,6 @@ package state
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 )
 
@@ -79,71 +78,6 @@ func (s *Store) RecentRuntimeLogs(ctx context.Context, limit int) ([]RuntimeLogR
 		return nil, fmt.Errorf("STATE_RUNTIME_LOGS_READ_FAILED: %w", err)
 	}
 	reverseRuntimeLogs(result)
-	return result, nil
-}
-
-func (s *Store) UpsertErrorAggregate(ctx context.Context, record ErrorAggregateRecord) (ErrorAggregateRecord, error) {
-	active := 0
-	if record.Active {
-		active = 1
-	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO error_aggregates(fingerprint, component, operation, message, count, first_seen, last_seen, active)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(fingerprint) DO UPDATE SET component=excluded.component, operation=excluded.operation,
-		message=excluded.message, count=error_aggregates.count + 1, last_seen=excluded.last_seen, active=1`,
-		record.Fingerprint, record.Component, record.Operation, record.Message, record.Count, record.FirstSeen, record.LastSeen, active)
-	if err != nil {
-		return ErrorAggregateRecord{}, fmt.Errorf("STATE_ERROR_AGGREGATE_UPSERT_FAILED: %w", err)
-	}
-	return s.ErrorAggregate(ctx, record.Fingerprint)
-}
-
-func (s *Store) ErrorAggregate(ctx context.Context, fingerprint string) (ErrorAggregateRecord, error) {
-	var record ErrorAggregateRecord
-	var active int
-	err := s.db.QueryRowContext(ctx, `SELECT fingerprint, component, operation, message, count, first_seen, last_seen, active
-		FROM error_aggregates WHERE fingerprint=?`, fingerprint).Scan(
-		&record.Fingerprint, &record.Component, &record.Operation, &record.Message, &record.Count, &record.FirstSeen, &record.LastSeen, &active,
-	)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return ErrorAggregateRecord{}, fmt.Errorf("STATE_ERROR_AGGREGATE_NOT_FOUND")
-		}
-		return ErrorAggregateRecord{}, fmt.Errorf("STATE_ERROR_AGGREGATE_READ_FAILED: %w", err)
-	}
-	record.Active = active != 0
-	return record, nil
-}
-
-func (s *Store) ResolveError(ctx context.Context, fingerprint string, timestamp int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE error_aggregates SET active=0, last_seen=? WHERE fingerprint=?`, timestamp, fingerprint)
-	if err != nil {
-		return fmt.Errorf("STATE_ERROR_RESOLVE_FAILED: %w", err)
-	}
-	return nil
-}
-
-func (s *Store) RecentErrorAggregates(ctx context.Context, limit int) ([]ErrorAggregateRecord, error) {
-	limit = boundedLimit(limit)
-	rows, err := s.db.QueryContext(ctx, `SELECT fingerprint, component, operation, message, count, first_seen, last_seen, active
-		FROM error_aggregates ORDER BY active DESC, last_seen DESC LIMIT ?`, limit)
-	if err != nil {
-		return nil, fmt.Errorf("STATE_ERROR_AGGREGATES_READ_FAILED: %w", err)
-	}
-	defer rows.Close()
-	result := make([]ErrorAggregateRecord, 0, limit)
-	for rows.Next() {
-		var record ErrorAggregateRecord
-		var active int
-		if err := rows.Scan(&record.Fingerprint, &record.Component, &record.Operation, &record.Message, &record.Count, &record.FirstSeen, &record.LastSeen, &active); err != nil {
-			return nil, fmt.Errorf("STATE_ERROR_AGGREGATE_SCAN_FAILED: %w", err)
-		}
-		record.Active = active != 0
-		result = append(result, record)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("STATE_ERROR_AGGREGATES_READ_FAILED: %w", err)
-	}
 	return result, nil
 }
 
