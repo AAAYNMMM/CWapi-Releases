@@ -2,24 +2,33 @@
 
 # CWapi
 
-**Turn ChatGPT Web into a local Windows development agent through Slack.**
+**Turn ChatGPT Web into a local coding agent — without a real MCP connection or Codex Agent quota.**
 
-**让网页 ChatGPT 通过 Slack 调用本机开发环境，并绑定到准确的 GitHub commit。**
+**让网页 ChatGPT 连接本地 Windows 开发环境，无需真正的 MCP 链路，也不消耗 Codex Agent 配额。**
 
-[![Release](https://img.shields.io/github/v/release/AAAYNMMM/CWapi-Releases?style=flat-square&label=Release)](https://github.com/AAAYNMMM/CWapi-Releases/releases)
-![Protocol](https://img.shields.io/badge/Protocol-CWapi%20MCP%20v2-6f42c1?style=flat-square)
+[![ChatGPT](https://img.shields.io/badge/ChatGPT-Plus%20%7C%20Pro-10a37f?style=flat-square)](https://chatgpt.com/)
+![MCP](https://img.shields.io/badge/MCP-Not%20Required-6f42c1?style=flat-square)
+![Codex Agent](https://img.shields.io/badge/Codex%20Agent%20Quota-Not%20Used-success?style=flat-square)
+![Protocol](https://img.shields.io/badge/CWapi-MCP%20v2-6f42c1?style=flat-square)
 ![Platform](https://img.shields.io/badge/Platform-Windows%2011-0078d4?style=flat-square)
 ![Install](https://img.shields.io/badge/Install-Portable-orange?style=flat-square)
+[![Release](https://img.shields.io/github/v/release/AAAYNMMM/CWapi-Releases?style=flat-square&label=Release)](https://github.com/AAAYNMMM/CWapi-Releases/releases)
 
-[5 分钟开始](#5-分钟开始) · [v1.6.1](#v161-主要变化) · [工作原理](#工作原理) · [Web GPT 入口](docs/WEB_GPT_ENTRY.md) · [用户指南](docs/USER_GUIDE.md)
+[快速开始](#快速开始) · [关于 MCP](#关于-mcp) · [使用前准备](#使用前准备) · [用户指南](docs/USER_GUIDE.md) · [Web GPT 入口](docs/WEB_GPT_ENTRY.md)
 
 </div>
 
 ---
 
-CWapi 是一个面向个人 Windows 开发环境的 **Web GPT → Slack → 本机工具** 网关。Web GPT 负责理解任务、读取和修改 GitHub；CWapi 负责把结构化请求绑定到指定 GitHub repository 和完整 40 位 commit，在本机准备隔离 worktree、调用 stock MCP 或进程工具，并把真实结果、日志和文件传回 Slack。
+CWapi 是面向个人 Windows 开发环境的 **Web GPT → Slack → 本机开发工具** 网关。Web GPT 负责理解任务、读写 GitHub 和决定开发步骤；CWapi 负责把结构化请求绑定到指定 GitHub repository 与完整 commit，在本机执行工具，并把真实结果、日志和文件经 Slack 返回。
 
-CWapi 不需要让 ChatGPT Web 直接连接本机 MCP Server，也不启动 Codex Agent Turn 替 Web GPT 思考。
+## 关于 MCP
+
+**CWapi 使用 MCP 风格的消息格式来组织结构化 request / response，但 ChatGPT Web 与本机之间并没有建立真正的 MCP 连接。**
+
+**CWapi uses MCP-style message formats for structured requests and responses, but it does not establish a real MCP connection between ChatGPT Web and the local machine.**
+
+Slack 承载 CWapi 的结构化消息；CWapi 内部可以调用 stock MCP server，但 ChatGPT Web 不需要直接连接本机 MCP Server。
 
 ## 工作原理
 
@@ -30,100 +39,87 @@ ChatGPT Web
 Slack control channel
    │ [CWapi/MCP/2]
    ▼
-CWapi Go Gateway
+CWapi
    ├─ exact GitHub repository + 40-char commit
-   ├─ request-unique detached worktree
-   ├─ stock Codex MCP relay
-   └─ process_start / process_status / process_stop
+   ├─ isolated worktree
+   ├─ stock MCP relay
+   └─ local process tools
             │
             ▼
       Local Windows tools
             │
             ▼
  Slack response / Slack File
-            │
-            └──────────────► ChatGPT Web
 ```
 
-## 5 分钟开始
+CWapi 不运行模型，也不启动 Codex Agent Turn 替 Web GPT 思考。
+
+## 使用前准备
+
+- Windows 11 x64；
+- 可用的 Slack Workspace；
+- ChatGPT 中连接 GitHub 和 Slack；
+- **自行安装 GitHub CLI，并在 Windows 本机完成登录。**
+
+GitHub CLI：<https://cli.github.com/>
+
+安装后在终端执行：
+
+```powershell
+gh auth login
+gh auth status
+```
+
+`gh auth status` 确认登录正常后再启动正式开发流程。CWapi portable 已包含自身需要的 Codex、MinGit、Node、Playwright MCP 与 Chromium，不需要另外安装这些运行时。
+
+## 快速开始
 
 1. 从 [GitHub Releases](https://github.com/AAAYNMMM/CWapi-Releases/releases) 下载 `CWapi-v1.6.1.zip`。
-2. 完整解压到任意用户可写目录，然后运行 `CWapi.exe`。不要只复制 exe，也不要删除随包 `runtime/`。
-3. 按 [`docs/SLACK_SETUP.md`](docs/SLACK_SETUP.md) 创建 Slack App，配置 Socket Mode、Bot scopes、App Token、Bot Token 和控制频道。
-4. 在 ChatGPT 中连接 GitHub 与 Slack。
+2. 完整解压到任意用户可写目录并运行 `CWapi.exe`，不要只复制 exe，也不要删除 `runtime/`。
+3. 按 [`docs/SLACK_SETUP.md`](docs/SLACK_SETUP.md) 完成 Slack App、Socket Mode、Token 与控制频道配置。
+4. 确认 GitHub CLI 已登录，并在 ChatGPT 中连接 GitHub 与 Slack。
 5. 第一次告诉 Web GPT：
 
 > 连接 GitHub，读取 `AAAYNMMM/CWapi-Releases` 的 `docs/WEB_GPT_ENTRY.md`，然后使用 CWapi v1.6.1 工作流处理我的项目。
 
-之后可以直接给开发任务，例如：
+之后直接提交开发任务即可。v1.6.1 不使用 project registry 或 `project_id`，repository request 直接携带 GitHub URL 与完整 40 位 commit。
 
-> 使用 CWapi 工作流开发 `https://github.com/username/project`，修改后在对应 exact commit 上完成本机测试。
+完整的人类端安装与配置流程见 [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md)。
 
-v1.6.1 已删除 project registry。Web GPT 不需要先在 CWapi 中登记项目，也不使用 `project_id`；repository 请求直接携带 GitHub URL 与完整 40 位 `expected_commit`。
+## v1.6.1
 
-## v1.6.1 主要变化
+- MCP v2：`[CWapi/MCP/2]` / `cwapi-mcp/2`；
+- GitHub repository URL + exact 40hex commit；
+- 每个 repository request 使用独立 worktree；
+- `process_start/status/stop` 由 Go Core 提供；
+- 默认 `SAFE`，需要更高本机写权限时由用户临时切换 `FULL`；
+- Slack 支持 MCP 文件、图片和大结果回传；
+- portable 自带 CWapi 所需主要 runtime。
 
-- 协议升级为 `[CWapi/MCP/2]` / `cwapi-mcp/2`，v1 不再兼容；
-- repository identity 改为 GitHub HTTPS URL + exact 40hex commit；
-- 每个 repository request 使用独立 detached worktree，共享 mirror；
-- `process_start/status/stop` 由 Go Core 直接实现，不再使用旧 Node CWapi process MCP；
-- stock MCP 使用 request-scoped ephemeral context；不同 request 不应假定共享浏览器状态；
-- `safe` 为默认权限，每次程序重启都会恢复为 `safe`；
-- `full_access` 仍先走 Codex，只有结构化权限拒绝才签发 60 秒、一次性 System Token fallback；
-- Slack 已支持 MCP image/blob/大文本的 external file upload；
-- Playwright 截图要传给 ChatGPT 时，`browser_take_screenshot` 不应指定 `filename`，让工具直接返回 MCP image content；
-- 外部环境发现顺序固定为 **CWapi 自管 runtime → 本机已有环境 → FULL 自动安装或用户手动安装**；
-- 外部任务单次连续等待/轮询累计最多 3 分钟，到上限必须返回当前状态而不是继续无限等待。
+执行细节、环境发现、权限 fallback、Playwright 和等待边界统一以 [`docs/CHATGPT_WORKFLOW.md`](docs/CHATGPT_WORKFLOW.md) 为准，不在 README 重复展开。
 
-完整执行规则见 [`docs/CHATGPT_WORKFLOW.md`](docs/CHATGPT_WORKFLOW.md)。
+## 文档
 
-## 权限模型
+### 用户
 
-CWapi v1.6.1 只有两个用户权限模式：
+- [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md)：从下载到第一次开发。
+- [`docs/SLACK_SETUP.md`](docs/SLACK_SETUP.md)：Slack App 配置。
+- [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)：故障排查。
 
-```text
-safe
-  -> 默认模式
-  -> repository process 只允许受控边界内写入
+### Web GPT
 
-full_access
-  -> 本次运行临时启用
-  -> Codex-first
-  -> 只有真实 PERMISSION_DENIED 才进入 System Token fallback
-```
+- [`docs/WEB_GPT_ENTRY.md`](docs/WEB_GPT_ENTRY.md)：最小入口。
+- [`docs/CHATGPT_WORKFLOW.md`](docs/CHATGPT_WORKFLOW.md)：完整执行规则。
 
-`full_access` 不跨程序重启保留。System Token 最多同时 3 个、60 秒过期、一次性使用，并绑定 repository、commit 和最终 invocation。
+### 协议 / 安全 / 开发
 
-协议与边界分别见 [`docs/PROTOCOL.md`](docs/PROTOCOL.md) 和 [`docs/SECURITY.md`](docs/SECURITY.md)。
-
-## 本机运行环境
-
-CWapi 自己需要的 Codex、MinGit、Node、Playwright MCP 与 Chromium 已包含在 portable runtime 中。目标项目额外需要的 Python、JDK、Go、Rust、SDK 等按以下顺序处理：
-
-```text
-CWapi 自管环境
-→ 本机已经安装的环境
-→ 都没有：用户切换 FULL 后由 Web GPT 安装，或用户手动安装
-→ 安装后重新探测真实 executable/version
-```
-
-不要在工作流里固定某台电脑上的 Python、Node 或其它安装路径。CWapi 的 PATH 是启动时冻结的快照，新安装工具必要时使用实际绝对路径，或重启 CWapi 后重新验证。
-
-## Slack 文件与截图
-
-CWapi 可以把 MCP 已经返回的 image/audio/blob/resource/大文本上传为 Slack File。它不会因为普通文本里出现 `./image.png` 或其它本地路径就擅自读取文件。
-
-Playwright 截图需要真正传给 ChatGPT 时推荐：
-
-```json
-{
-  "fullPage": true,
-  "scale": "css",
-  "type": "png"
-}
-```
-
-不要指定 `filename`。详细说明见 [`docs/SLACK_TRANSPORT.md`](docs/SLACK_TRANSPORT.md)。
+- [`docs/PROTOCOL.md`](docs/PROTOCOL.md)：MCP v2 wire contract。
+- [`docs/SECURITY.md`](docs/SECURITY.md)：权限与安全边界。
+- [`docs/SLACK_TRANSPORT.md`](docs/SLACK_TRANSPORT.md)：Slack transport 与文件交付。
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)：架构。
+- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)：源码开发约束。
+- [`docs/LOCAL_VALIDATION.md`](docs/LOCAL_VALIDATION.md)：维护者回归。
+- [`CHANGELOG.md`](CHANGELOG.md)：版本变化。
 
 ## 便携包
 
@@ -135,40 +131,14 @@ CWapi/
 └─ CWapi-data/     # 首次运行后生成
 ```
 
-`CWapi-data`、Slack Token、Credential Manager 内容、日志、数据库、仓库和 browser profile 不属于发行 ZIP。
+`CWapi-data`、用户凭据、日志、数据库、仓库和 browser profile 不属于发行 ZIP。
 
-v1.6.1 portable manifest 的源代码 commit 为：
+v1.6.1 portable manifest 对应源码 commit：
 
 ```text
 c901841faeede4b851946bb35b6c1724fa1ffb74
 ```
 
-本公开仓库同步该 v1.6.1 源码线，并额外保留面向公开发行的用户文档；测试 fixture 中与开发机有关的路径/Slack ID 已替换为匿名示例，不影响生产代码语义。
-
-## 文档入口
-
-- [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md)：第一次安装和使用。
-- [`docs/SLACK_SETUP.md`](docs/SLACK_SETUP.md)：Slack App 从零配置。
-- [`docs/WEB_GPT_ENTRY.md`](docs/WEB_GPT_ENTRY.md)：Web GPT 快速入口。
-- [`docs/CHATGPT_WORKFLOW.md`](docs/CHATGPT_WORKFLOW.md)：完整 Web GPT 执行规则。
-- [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)：故障排查。
-- [`docs/PROTOCOL.md`](docs/PROTOCOL.md)：MCP v2 wire contract。
-- [`docs/SECURITY.md`](docs/SECURITY.md)：安全与权限边界。
-- [`docs/SLACK_TRANSPORT.md`](docs/SLACK_TRANSPORT.md)：Slack transport 与文件交付。
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)：系统架构。
-- [`docs/LOCAL_VALIDATION.md`](docs/LOCAL_VALIDATION.md)：维护者回归方法。
-- [`CHANGELOG.md`](CHANGELOG.md)：版本变化。
-
 ## 从源码构建
 
-开发环境要求 Windows、Go、Node/npm 与 Wails 相关工具。基础检查：
-
-```powershell
-go test ./...
-cd frontend
-npm ci
-npm test
-npm run build
-```
-
-正式 portable 的 staging、runtime、GUI、Slack 与 privacy gate 见 [`docs/LOCAL_VALIDATION.md`](docs/LOCAL_VALIDATION.md) 和 [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md)。
+开发环境与发行门禁见 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)、[`docs/LOCAL_VALIDATION.md`](docs/LOCAL_VALIDATION.md) 和 [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md)。
