@@ -1,4 +1,4 @@
-# CWapi v1.6.0 故障排查
+# CWapi v1.6.1 故障排查
 
 这份文档只回答：**出了什么问题，下一步查哪里。** 正常使用见 [`USER_GUIDE.md`](USER_GUIDE.md)，Slack 从零配置见 [`SLACK_SETUP.md`](SLACK_SETUP.md)。
 
@@ -7,178 +7,205 @@
 ### CWapi 启动不了
 确认 Windows 11 x64、ZIP 已完整解压、`CWapi.exe` 与 `runtime/` 在同一便携目录、安装目录可写。不要在 ZIP 内直接运行，也不要混用不同版本的 `runtime/`。
 
-首次运行后会生成 `CWapi-data/`。如果刚移动安装位置，移动整个目录而不是只移动 exe。
+首次运行后会生成 `CWapi-data/`。移动时关闭 CWapi 并移动整个便携目录。
 
 ## 2. Slack 问题
 
-完整 scopes / Socket Mode / token / Channel ID 步骤统一看 [`SLACK_SETUP.md`](SLACK_SETUP.md)。
+完整 scopes / Socket Mode / token / Channel ID 步骤见 [`SLACK_SETUP.md`](SLACK_SETUP.md)。
 
-### “验证并保存”失败
+### 配置验证失败
 
 ```text
 SLACK_APP_TOKEN_INVALID
-→ App Token 必须是 xapp-...
+-> App Token 必须是 xapp-...
 
 SLACK_BOT_TOKEN_INVALID
-→ Bot Token 必须是 xoxb-...
+-> Bot Token 必须是 xoxb-...
 
 SLACK_READINESS_BOT_IDENTITY_FAILED
-→ Bot Token 无效 / 被撤销 / Workspace 不匹配
+-> Bot Token 无效 / 被撤销 / Workspace 不匹配
 
 SLACK_READINESS_CHANNEL_FAILED
-→ Channel ID 错、缺 read scope、Bot 没加入频道
+-> Channel ID 错、缺 read scope、Bot 没加入频道
 
 SLACK_BOT_NOT_CHANNEL_MEMBER
-→ 把 CWapi Bot 加入控制频道
+-> 把 CWapi Bot 加入控制频道
 
 SLACK_READINESS_SOCKET_FAILED
-→ 检查 Socket Mode、xapp token、connections:write
+-> 检查 Socket Mode、App Token、connections:write
 ```
-
-### 能保存，但 Slack 很快 degraded
-public channel 重点检查 `channels:read`、`channels:history`、`message.channels`；private channel 检查 `groups:read`、`groups:history`、`message.groups`。修改 scopes 后要 **Reinstall to Workspace**。
 
 ### 能收请求但不能回文本
 检查 `chat:write`。
 
 ### 文本正常但截图 / 文件失败
-检查 `files:write`。
-
-### `SLACK_API_ERROR_missing_scope`
-添加缺失 scope 后 **Reinstall to Workspace**。
+检查 `files:write`。如果是 Playwright，确认 `browser_take_screenshot` 没有指定 `filename`，让工具返回真正的 MCP image content。
 
 ### CWapi 没收到 Web GPT 消息
-确认 Slack Transport healthy、Web GPT 发到同一 Workspace / Channel ID、Bot 在频道内、Event Subscription 正确。
-
-正式协议消息还必须是完整 frame：
+确认 Slack healthy、Web GPT 和 CWapi 使用同一 Workspace/Channel、Bot 在频道内，并且消息是完整 MCP v2 frame：
 
 ```text
 +++
-[CWapi/MCP/1][MCP_REQUEST][REQUEST_ID]
-{JSON body}
+[CWapi/MCP/2][MCP_REQUEST][REQUEST_ID]
+{"schema":"cwapi.mcp.request.v2","protocol_version":"cwapi-mcp/2",...}
 +++
 ```
 
-CWapi 不会自动执行启动前已经存在的旧频道消息。
+v1.6.1 不接受 MCP v1。
 
-## 3. Project / exact commit
+## 3. Repository / exact commit
 
-### Web GPT 不知道 project_id
-调用 `projects/list` 或 `mcpServerStatus/list`，不要猜，也不要照搬别的安装实例里的 ID。
+v1.6.1 没有 project registry、`projects/list` 或 `project_id`。
 
-### `MCP_PROCESS_CONTEXT_REQUIRED`
-外层 request 同时提供 `project_id + expected_commit`。
+repository-scoped request 必须同时提供：
 
-### `MCP_PROJECT_CONTEXT_INCOMPLETE`
-只提供了二者之一；必须成对出现。
+```text
+repository_url
+expected_commit
+```
 
-### `MCP_PROJECT_ID_INVALID`
-重新 discovery 当前真实 `project_id`。
+### repository URL 被拒绝
+只使用标准 GitHub HTTPS repository URL，例如：
 
-### `MCP_EXPECTED_COMMIT_INVALID`
-必须使用完整 40 位 Git SHA，不能用短 SHA。
+```text
+https://github.com/owner/repo
+```
 
-### exact commit 准备失败
-检查项目 Git 地址、commit 是否属于该仓库、网络 / Git 凭据，以及 Web GPT 是否真的拿到当前新 commit。旧 commit 的测试结果不能证明新 commit 已通过。
+不要携带 userinfo、port、query、fragment 或额外 path。
 
-## 4. MCP / process tool
+### commit 被拒绝
+`expected_commit` 必须是完整 40 位 Git commit，并且属于该 repository。
 
-### `MCP_CWAPI_TOOL_UNAVAILABLE`
-当前 `cwapi` process server 只公开：`process_start`、`process_status`、`process_stop`。先用 `mcpServerStatus/list` 看真实 catalog。
+### private repository 准备失败
+检查本机 GitHub CLI / GitHub 凭据是否能访问目标 private repository，以及 commit 是否真实存在。不要把 GitHub token 放进 MCP command/argv。
 
-### `MCP_PROCESS_ARGUMENTS_INVALID`
-arguments 不符合当前 tool schema，重新读取 catalog。
+## 4. MCP route / process tool
 
-### `MCP_PROCESS_CONTEXT_MANAGED`
-caller 不允许传 `_cwapi_workspace`、`_cwapi_expected_commit`、`_cwapi_request_id`；这些由 CWapi 注入。
+当前允许的方法只有：
+
+```text
+mcpServerStatus/list
+mcpServer/resource/read
+mcpServer/tool/call
+```
+
+`server=cwapi` 只接受：
+
+```text
+process_start
+process_status
+process_stop
+```
+
+### `MCP_REQUEST_JSON_INVALID`
+先检查 JSON 本身，尤其是 Windows `\` 路径与嵌套 shell 字符串。正式远程路径优先使用 `/`，减少 JSON escape 错误。
+
+### `MCP_SYSTEM_TOKEN_INVALID`
+System Token 只能位于 request 顶层，格式必须符合 v2 协议。不要放进 params/arguments。
+
+### request id conflict
+同一个 request id 只能对应同一个 fingerprint。新动作或新状态快照使用新的 request id。
 
 ## 5. 环境 / executable
 
-### `PROCESS_COMMAND_NOT_FOUND`
-检查 command 是 PATH 名称、absolute executable path 还是 working-directory-relative path。
+### `process invocation could not be resolved` / command not found
+先把它当成 executable 解析失败，不要立即归因于项目代码。
 
-例如：
+按顺序检查：
 
 ```text
-python.exe
-C:/Program Files/Git/cmd/git.exe
-tools/build.cmd
-.venv/Scripts/python.exe
+1. CWapi portable/runtime/tools/cache
+2. 本机已有环境，而且必须是 CWapi 当前进程实际可见的环境
+3. 两边都没有：停止猜路径
+4. 用户切换 FULL 后由 Web GPT 安装，或用户手动安装
+5. 安装后重新探测 executable/version
 ```
 
-### Python 明明装了但找不到
-先发现环境：`where.exe python`、`where.exe py`、`py.exe -0p`。找到真实 Python 后直接传准确路径。Java/JDK、Node、Go、Rust、Android SDK、CUDA 同理。
+不要固定 `C:/WINDOWS/py.exe`、`python.exe`、`node.exe` 或某个用户目录作为通用规则。
 
-### Windows 路径怎么写
-MCP JSON 统一使用 `/`，例如 `C:/Program Files/Java/jdk-25/bin/java.exe`。不要给 `command` 再额外套一层引号。
+### 本机终端能运行，CWapi 却找不到
+CWapi 使用启动时冻结的 PATH。交互式 PowerShell 后来新增的 PATH 不一定对当前 CWapi 生效。找到实际 executable 后直接使用绝对路径，或重启 CWapi 后再验证。
 
-### 上一次创建的 `.venv` 下一次没了
-exact-commit worktree 是临时执行上下文。需要长期复用的环境放明确持久位置并用 absolute executable，或者按项目需要重建。
+### repository 内脚本 basename 找不到
+优先直接使用 repository-relative command：
 
-### `PROCESS_START_FAILED`
-看 `command_path`、`command_resolution`、`stdout_tail`、`stderr_tail` 和系统启动错误。`ENOENT` 通常表示 executable 或启动路径未找到。
+```text
+tools/build.cmd
+scripts/test.bat
+```
 
-## 6. process 生命周期
+不要为了找到脚本先改 cwd，再只传 basename。
 
-### 返回 `state = running` 是失败吗
-不是。长期 server 正常会返回 `running + process_id`。后续查同一个 `process_id`，不要重新 start。
+### Windows path
+MCP JSON 中优先使用：
 
-### `process_stop` 后 exit_code 不是 0
-主动终止长期服务不一定自然退出。优先看 `state = stopped`，再验证端口 / 服务是否真的关闭。
+```text
+C:/Program Files/Tool/tool.exe
+```
+
+而不是未经正确 JSON 转义的反斜杠路径。
+
+## 6. SAFE / FULL 权限
+
+### SAFE 能不能调用本机已有程序
+能否启动与能否写系统目录是两件事。SAFE 可以调用允许解析的本机程序，但 repository process 的写权限仍受控。
+
+如果安装器、pip、npm 或其它工具尝试写受控范围外位置，可能得到权限拒绝。
+
+### 什么时候切 FULL
+确认任务确实需要安装软件或扩大本机写权限，并且 CWapi 自管环境与本机已有环境都不能满足需求时，由用户明确切换 FULL。
+
+FULL 仍是 Codex-first。只有真实结构化 `PERMISSION_DENIED` 才进入短期 System Token fallback。FULL 不跨 CWapi 重启保留。
+
+## 7. process 生命周期
+
+### `state = running` 是失败吗
+不是。长进程正常会返回 `running + process_id`。后续用新的 global request id 查询同一个 `process_id`，不要重新 start。
+
+### `process_stop` 后 exit code 不好看
+主动终止长期服务不一定自然返回 0。重点确认公开 state 是否为 `stopped`，以及服务/端口是否真的关闭。
 
 ### localhost `ERR_CONNECTION_REFUSED`
-启动阶段出现时，检查 process 是否 running、stdout 是否 ready、stderr、端口和 bind 地址。若在 `process_stop` 后出现，通常说明服务确实已停止。
+启动阶段出现时检查 process state、stdout/stderr、端口与 bind address；如果是在 stop 后验证，反而可能说明服务已正确停止。
 
-## 7. Playwright / Web E2E
+## 8. Playwright / Web E2E
 
-### 页面能打开但功能不对
-不要只看 navigate / click。继续读取真实业务状态：
+### navigate 成功，下一条 fill 却找不到元素
+stock MCP context 是 request-scoped ephemeral。不同 request 不保证共享浏览器页面状态。
 
-```text
-navigate → fill / click → browser_evaluate / DOM read → verify
-```
+连续 E2E 优先在一次 Playwright 调用中完成；拆开时，每个后续 request 自己重建所需页面状态。
 
-### `browser_evaluate` 报 JavaScript 错
-检查 function 语法、selector、页面加载状态，以及 JSON / Slack 字符串转义。function 尽量保持简短。
+### 截图只得到 `./xxx.png`
+这通常表示工具把截图保存在本地，并只返回了路径文本。CWapi 不会因为普通文本里出现本地 path/URI 就擅自读取文件。
 
-## 8. Slack File / 本地文件
-
-### 截图为什么变成 Slack File
-图片不是短文本。CWapi outbound policy 会按 Slack File 交付。当前限制：单 artifact ≤ 8 MiB，单 response ≤ 16 artifacts。
-
-### result 里有本地路径，为什么不自动上传
-只有 MCP **已经取得并返回**的 text/blob/image/resource content 才进入 outbound policy。路径字符串本身不会触发 CWapi 私自读取本地文件。
+需要传给 ChatGPT 时不传 `filename`，让 Playwright 返回 MCP `type=image` content，CWapi 再上传为 Slack File。
 
 ## 9. Duplicate / 长任务
 
 ### duplicate request 为什么不执行第二次
-CWapi 用 request fingerprint 做幂等。same request 不应再次启动副作用任务；真正的新动作使用新的 request ID。
+相同 request id + 相同 fingerprint 会返回已保存 response，不重复执行副作用。
 
-### Web GPT 为什么 3 分钟就停止等待
-这是等待预算，不是 cancel。同一个外部任务单次回复累计最多等待 3 分钟；到上限仍无 terminal result 时，Web GPT 报告当前 ID / commit / 状态，下一轮继续查询原任务，不重复提交。
+### 为什么 3 分钟就停止等待
+这是 Web GPT 工作流的等待预算，不是 cancel。
 
-## 10. 权限问题
+同一个外部任务连续等待/轮询累计最多 3 分钟；到上限仍无 terminal result 时，报告“任务仍在运行”、request/process id 和最后状态。下一轮继续查询原任务，不重复提交。
 
-### safe 为什么还能运行自由 command
-这是两套边界：Codex-managed execution 使用 `cwapi-safe / cwapi-full-access`；packaged `cwapi` command/process MCP 以当前 Windows 用户权限运行。自由 executable 不自动继承 Codex thread sandbox。
+环境缺失不是等待事件。确认依赖不存在后立即进入安装决策。
 
-### full_access 是不是关闭所有保护
-不是。它扩大 Codex-managed filesystem permission，但 CWapi 自己的 secret、幂等、owned process、delivery 等边界仍存在。完整解释见 [`SECURITY.md`](SECURITY.md)。
+## 10. 收集最小排障信息
 
-## 11. 仍然定位不了问题
-
-从 CWapi“诊断”页收集最小必要信息：
+优先收集：
 
 ```text
-CWapi version / source_commit
+CWapi version
 permission mode
-project_id + expected_commit
+repository URL + expected commit
 request_id + method + server/tool
 terminal status + error.code + error.message
 process_id（如果有）
 必要的 stdout_tail / stderr_tail
 ```
 
-不要直接上传整个 `CWapi-data`、Credential Manager 内容或所有日志。
+不要直接上传整个 `CWapi-data`、Credential Manager、Token 或所有日志。
 
-专项文档：Slack [`SLACK_SETUP.md`](SLACK_SETUP.md)；运行维护 [`OPERATIONS.md`](OPERATIONS.md)；安全 [`SECURITY.md`](SECURITY.md)；Web GPT [`CHATGPT_WORKFLOW.md`](CHATGPT_WORKFLOW.md)；协议 [`PROTOCOL.md`](PROTOCOL.md)。
+专项文档：[`PROTOCOL.md`](PROTOCOL.md)、[`SECURITY.md`](SECURITY.md)、[`CHATGPT_WORKFLOW.md`](CHATGPT_WORKFLOW.md)、[`SLACK_TRANSPORT.md`](SLACK_TRANSPORT.md)。
