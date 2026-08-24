@@ -1,60 +1,47 @@
-# CWapi v1.6.0 Web GPT Entry
+# CWapi v1.6.1 Web GPT Entry
 
-这是 **Web GPT 使用 CWapi v1.6.0 的唯一必读入口**。这里只保留执行所需规则；人类安装、Slack 配置、GUI、运维不在这里重复。
+这是 **Web GPT 使用 CWapi v1.6.1 的快速入口**。完整规则见 [`CHATGPT_WORKFLOW.md`](CHATGPT_WORKFLOW.md)，协议细节见 [`PROTOCOL.md`](PROTOCOL.md)。
 
 ## 1. 当前链路
 
 ```text
-Web GPT → GitHub：源码 / exact commit
-       → Slack：CWapi MCP frame
-       → CWapi：discovery / exact-commit / state / delivery
-       → stock Codex app-server → configured MCP server
-       → response / Slack File
+Web GPT
+  -> GitHub：读取源码、修改、取得 exact commit
+  -> Slack：发送 CWapi MCP v2 frame
+  -> CWapi：校验 / exact-commit worktree / process / delivery
+  -> stock MCP 或 Go Core process tools
+  -> Slack response / Slack File
 ```
 
-Web GPT 负责决策；CWapi 不规划项目；正常 relay 不启动 Codex model Turn。
+CWapi 不运行模型，也不要求 ChatGPT Web 与本机建立直接 MCP 连接。
 
-## 2. 新会话先 discovery
+## 2. 不再有 project registry
 
-优先：
+v1.6.1 已删除 `projects/list`、`project_id` 和 GUI 项目 CRUD。
+
+repository request 直接携带：
 
 ```text
-mcpServerStatus/list
+repository_url  = https://github.com/owner/repo
+expected_commit = 完整 40 位 Git SHA
 ```
 
-读取 stock MCP catalog 与 CWapi 附加的 `cwapi.discovery.v1`。
+二者必须成对出现。CWapi 根据 repository identity 维护共享 mirror，并为每个 repository request 创建独立 detached worktree。
 
-只需要项目列表时：
+## 3. 当前协议
+
+正式请求：
 
 ```text
-method = projects/list
-params = {}
++++
+[CWapi/MCP/2][MCP_REQUEST][REQUEST_ID]
+{"schema":"cwapi.mcp.request.v2","protocol_version":"cwapi-mcp/2",...}
++++
 ```
 
-不要猜 `project_id`。
+v1.6.1 只接受 MCP v2。不要再发送 `[CWapi/MCP/1]` 或旧 v1 schema。
 
-## 3. 项目调用绑定 exact commit
-
-项目 request 同时提供：
-
-```text
-project_id
-expected_commit   # GitHub 仓库完整 40 位 SHA
-```
-
-CWapi 自己完成 project lookup、Git fetch、commit verification、detached worktree 与 context 建立。
-
-Web GPT 不提供本机 worktree path、Codex `threadId`、`CODEX_HOME`、profile ID，也不能注入 `_cwapi_workspace`、`_cwapi_expected_commit`、`_cwapi_request_id`。
-
-## 4. 当前 request methods
-
-CWapi 自己处理：
-
-```text
-projects/list
-```
-
-stock app-server relay：
+允许的远程方法只有：
 
 ```text
 mcpServerStatus/list
@@ -62,24 +49,16 @@ mcpServer/resource/read
 mcpServer/tool/call
 ```
 
-不要沿用 v1.5.1 的 Gmail / Runner / `workspace.open` / `test.run` / `build.run` / `automation.run` / `fs.*` / 顶层 `process.*` 等旧合同。
-
-## 5. Slack frame
-
-正式 request：
+第一次需要确认 stock MCP catalog 时，可先做 global：
 
 ```text
-+++
-[CWapi/MCP/1][MCP_REQUEST][REQUEST_ID]
-{JSON body}
-+++
+method = mcpServerStatus/list
+params = {}
 ```
 
-subject ID 与 JSON `request_id` 必须一致。
+## 4. 本机命令
 
-## 6. 本机命令走 cwapi process tools
-
-当前：
+CWapi virtual process tools：
 
 ```text
 server = cwapi
@@ -88,103 +67,101 @@ process_status
 process_stop
 ```
 
-`process_start.command` 支持：
+`process_start` 是 repository-scoped，外层 request 必须提供 repository URL + exact commit。
 
-```text
-PATH executable name
-absolute executable path
-working-directory-relative executable path
-```
-
-Windows MCP JSON 路径统一使用 `/`，不要给 `command` 值再套引号。
-
-如果 `process_start` 返回：
+如果返回：
 
 ```text
 state = running
 process_id = proc-...
 ```
 
-后续查询同一个 `process_id`，不要重复 start；测试结束需要时 `process_stop`。
+后续使用新的 request id 调 global `process_status` 查询同一个 process；不要重复 `process_start`。
 
-## 7. 环境职责
+## 5. 外部运行环境
 
-目标项目的 Python / JDK / Go / Rust / SDK 等环境由 Web GPT 或用户发现、安装、选择和管理。
-
-原则：
+需要 Python、Node、JDK、Go、Rust、SDK 等目标项目环境时：
 
 ```text
-先读项目版本要求
-→ 检查已有环境
-→ 已有则复用
-→ 缺失才安装
-→ 使用准确 executable
+先找 CWapi 管理的 runtime/tools/cache
+→ 没有再找本机已经安装、且 CWapi 实际可见的环境
+→ 两边都没有：停止猜路径
+→ 用户切换 FULL 后由 Web GPT 安装，或用户手动安装
+→ 安装后重新探测真实 executable/version
 ```
 
-exact-commit worktree 是临时执行上下文，不要默认一次 request 在其中生成的 `.venv` 会跨 request 永久存在。
+不要固定某台机器的 Python/Node 路径。CWapi 的 PATH 是启动时冻结的快照，新安装程序必要时直接使用实际绝对路径或重启 CWapi 后再验证。
 
-完整环境与进程策略见 [`CHATGPT_WORKFLOW.md`](CHATGPT_WORKFLOW.md)。
+Windows path 在 MCP JSON 中优先使用 `/`。
 
-## 8. Playwright
+## 6. Playwright
 
-典型 localhost E2E：
+stock MCP context 是 request-scoped ephemeral。不同 request 不应假定共享页面、tab、locator 或其它浏览器状态。
+
+连续的：
 
 ```text
-process_start server
-→ browser_navigate
-→ fill / click
-→ browser_evaluate / DOM read 验证真实结果
-→ screenshot（需要时）
-→ process_stop
+navigate -> fill -> click -> assert -> screenshot
 ```
 
-不要把“页面打开了”或“按钮点了”当成业务通过。
+优先在一次 Playwright 调用中完成；如果拆成多个 request，后续 request 自行重新建立页面状态。
 
-不要使用 Playwright unsafe arbitrary-code 能力冒充通用 shell / build runner；本机命令走 `cwapi/process_start`。
+### 截图传回 Slack
 
-## 9. 文件 / 图片 / 日志
+需要 ChatGPT 真正拿到截图时，调用 `browser_take_screenshot` **不要传 `filename`**：
 
-CWapi 只外发 **MCP 已经返回的内容**：短文本 inline；长文本 / 日志、image、resource text/blob 可转 Slack File。
+```json
+{
+  "fullPage": true,
+  "scale": "css",
+  "type": "png"
+}
+```
 
-当前主要限制：
+这样工具可以返回 MCP `type=image` content，CWapi 会自动上传为 Slack File。
+
+如果指定 `filename` 后只返回 `./image.png`，那只是本机路径；CWapi 不会根据普通文本路径擅自读取本地文件。
+
+## 7. 权限
+
+每次 CWapi 启动默认 `SAFE`。
 
 ```text
-单 artifact ≤ 8 MiB
-单 response ≤ 16 artifacts
+SAFE
+  -> 默认受控执行
+
+FULL
+  -> 本次运行临时启用
+  -> 仍先走 Codex
+  -> 真实结构化 PERMISSION_DENIED 时才签发短期 System Token fallback
 ```
 
-CWapi 不因为 result 中出现本地 path / URI 就自行读取对应文件。
+System Token 最多同时 3 个、60 秒、一次性使用，并绑定 repository/commit/final invocation。
 
-## 10. 权限边界
+安装新软件或需要扩大本机写权限时，由用户明确切换 FULL 后再执行。
 
-Codex-managed execution：
+## 8. 等待规则
+
+对同一个外部编译、进程、Slack response 或其它异步结果，单次连续等待/轮询累计最多 **3 分钟**。
+
+到 3 分钟仍没有 terminal result：
 
 ```text
-safe        -> cwapi-safe
-full_access -> cwapi-full-access
+立即停止继续等待
+→ 报告“任务仍在运行”
+→ 给出 request/process id 与最后状态
+→ 下一轮查询原任务
+→ 不重复提交
 ```
 
-packaged `cwapi` command/process MCP 启动的自由 executable 以当前 Windows 用户权限运行，**不自动继承 Codex thread filesystem / execpolicy sandbox**。
+缺少环境不是等待条件。确认工具不存在后直接进入 FULL 安装或用户手动安装分支。
 
-不要把 token、password、private key 放进 command / argv。
-
-## 11. Duplicate 与等待
-
-fingerprint 绑定：
-
-```text
-project_id + expected_commit + method + canonical params
-```
-
-same request 不重复执行；ambiguous side-effect call 不自动 replay。
-
-对同一个外部任务，单次回复累计最多等待 **3 分钟**。到上限仍无 terminal result：报告 request/task/process ID、exact commit 和最后状态；下一轮只查询原任务；不重复提交；停止等待不等于 cancel。
-
-## 12. 需要更多细节时
+## 9. 更多细节
 
 - 完整 Web GPT 工作流：[`CHATGPT_WORKFLOW.md`](CHATGPT_WORKFLOW.md)
-- 错误排查：[`TROUBLESHOOTING.md`](TROUBLESHOOTING.md)
-- 协议格式：[`PROTOCOL.md`](PROTOCOL.md)
-- 安全边界：[`SECURITY.md`](SECURITY.md)
+- MCP v2：[`PROTOCOL.md`](PROTOCOL.md)
+- 权限：[`SECURITY.md`](SECURITY.md)
+- Slack 文件与截图：[`SLACK_TRANSPORT.md`](SLACK_TRANSPORT.md)
+- 故障：[`TROUBLESHOOTING.md`](TROUBLESHOOTING.md)
 
-Slack App 怎么创建和配置是用户安装问题，统一见 [`SLACK_SETUP.md`](SLACK_SETUP.md)，不要让 Web GPT 通过普通消息索要用户的 `xapp-...` / `xoxb-...`。
+Slack App Token / Bot Token 只填入本机 CWapi，不要通过普通消息交给 Web GPT。
