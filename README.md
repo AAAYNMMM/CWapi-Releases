@@ -25,7 +25,10 @@ CWapi 让普通 ChatGPT Web 会话通过 Slack 调用本机 Windows 开发环境
 
 **CWapi 使用 MCP 风格的消息格式来组织结构化 request / response，但 ChatGPT Web 与本机之间并没有建立真正的 MCP 连接。**
 
-**CWapi uses MCP-style message formats for structured requests and responses, but it does not establish a real MCP connection between ChatGPT Web and the local machine.**
+**CWapi uses MCP-style message formats for structured requests and responses, but it does not establish a real MCP connection between ChatGPT Web and the local machine.**   
+
+<img width="373" height="688" alt="Snipaste_2026-08-25_02-45-09" src="https://github.com/user-attachments/assets/38654765-d920-43d4-ac45-f026bdd4b17b" />
+
 
 ## 功能
 
