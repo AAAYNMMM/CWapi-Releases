@@ -42,6 +42,37 @@ start 在 700ms 内完成则直接返回 terminal record，否则返回 stable p
 - Windows path 在 MCP JSON 中统一使用 `/`。如果必须使用 `\`，必须正确做 JSON 转义，避免在 claim 前得到 `MCP_REQUEST_JSON_INVALID`；
 - 环境探测失败后应进入“受控环境 -> 本机环境 -> FULL 安装/用户手动安装”的下一层，不得用无限 PATH 猜测造成阻塞。
 
+## 衍生资源复用规则
+
+v1.6.1 可以复用已经产生且仍然有效的衍生资源，但复用范围受 request-unique worktree 生命周期限制。**复用优先于重复构建，但正确性优先于复用。**
+
+### 可以复用
+
+- **同一个仍存活的 repository worktree 内的资源。** 编译物、中间文件、生成代码、依赖目录、项目内缓存等，只要仍位于当前存活 worktree 中且输入没有变化，应优先复用，不要无理由重复生成。
+- **同一个 `process_start` 执行链中的产物。** 如果 `build -> test -> package -> run` 依赖同一批编译结果，优先用一个仓库脚本或一个 `process_start` 完成连续步骤，让后续步骤直接使用前面生成的资源；不要为了每一步都新开 repository request 而主动丢失前一步产物。
+- **仍为 `starting` / `running` 的长期进程或服务。** dev server、test server、watcher、localhost 服务等已经启动且与当前 commit/config 相符时，后续浏览器或客户端检查应复用现有服务。启动同类新进程前先用 `process_status` 确认旧进程是否仍可用。
+- **System Token fallback 保留的原 dirty tree。** FULL 模式下 Codex 因权限被拒并进入同一 invocation 的 System fallback 时，CWapi 会保留原 worktree；不要仅因为 backend 从 Codex 切换到 System 就重新构建已经存在且仍有效的中间资源。
+- **CWapi 自己维护的 Git mirror。** repository mirror 会由 CWapi 自动复用。调用方不应为了“缓存 Git”自行额外 clone/fetch 一份仓库。
+
+### 不允许假定可复用
+
+- **不同 repository request 之间的 worktree 文件不能直接复用。** 每个新的 repository request 使用新的 request-unique detached worktree；原 process 进入 terminal 状态后，其 worktree cleanup 会删除其中的编译物、`dist/`、`target/`、`.venv/`、`node_modules/`、临时索引等未提交资源。
+- 即使 `repository_url` 和 `expected_commit` 完全相同，也不能因为上一条 request 曾生成过某个路径，就在下一条 request 中直接引用该旧路径。
+- 重发相同 `request_id` 只会按幂等规则返回已保存 response，不代表旧 worktree 会重新开放，也不是衍生资源缓存机制。
+- stock MCP 的不同 request 同样不能假定共享 repository 文件状态、浏览器页面、tab、locator 或其它 session state。
+- 本机工具自己的全局缓存如果碰巧可读，可以由工具自然命中，但它不属于 CWapi 保证的复用资源；不得依赖未验证的全局缓存来跳过必要的构建或校验。
+
+### 必须失效并重新生成
+
+出现以下任一情况，应把相关衍生资源视为失效：
+
+- `expected_commit` 改变，或相关源码已经变化；
+- dependency lockfile、build config、编译参数、目标平台、工具链版本或影响结果的环境发生变化；
+- 原拥有该资源的 process 已进入 `completed` / `failed` / `stopped`，因此对应 worktree 已进入 cleanup；
+- 无法证明资源对应当前输入，或复用可能掩盖测试/构建正确性问题。
+
+不得为了制造跨请求缓存而主动切换 FULL，把编译物或缓存散落到任意用户目录。用户明确需要长期保存某个产物时，应把“持久化产物”作为单独任务处理；v1.6.1 本身没有 CWapi 管理的跨 repository-request build artifact cache。
+
 ## Permission fallback
 
 ```text
@@ -98,6 +129,8 @@ stock MCP 使用 request-scoped ephemeral context。需要完成“打开页面 
 
 - 为每个新动作/状态快照生成新 request_id；
 - Windows path 在协议中使用 `/`；
+- 优先复用当前仍存活且输入一致的衍生资源，不无理由重复 build/install/start；
+- 不把已结束 request 的 worktree 文件当作跨请求缓存；
 - 只在 configured channel 传递短期 Token；
 - 不把 Slack response 里的 Token 复制到 issue、日志或长期文档；
 - System fallback 前确认该直接命令确实需要当前 Windows 用户权限；
