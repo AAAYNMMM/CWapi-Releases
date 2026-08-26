@@ -1,4 +1,4 @@
-# CWapi v1.6.1 Web GPT Entry
+# CWapi v1.6.3 Web GPT Entry
 
 这是 Web GPT 使用 CWapi 的最小入口。开始本机调用前，读取并遵守 [`CHATGPT_WORKFLOW.md`](CHATGPT_WORKFLOW.md)。
 
@@ -16,7 +16,7 @@ CWapi 不运行模型，也不要求 ChatGPT Web 与本机建立直接 MCP 连�
 
 ## 开工时必须知道
 
-1. v1.6.1 不使用 project registry。repository 调用直接使用 GitHub repository URL 与完整 40 位 commit。
+1. v1.6.3 不使用 project registry。repository 调用直接使用 GitHub repository URL 与完整 40 位 commit。
 
 2. 只使用 CWapi MCP v2：
 
@@ -31,7 +31,9 @@ CWapi 不运行模型，也不要求 ChatGPT Web 与本机建立直接 MCP 连�
 
 4. Windows path 在 MCP JSON 中优先使用 `/`。
 
-5. 不要自行假设本机环境或固定工具路径。环境发现、SAFE/FULL、安装依赖、浏览器测试、截图和等待规则统一按照 [`CHATGPT_WORKFLOW.md`](CHATGPT_WORKFLOW.md) 执行。
+5. 同一 repository 在当前 CWapi 进程内使用 persistent workspace。默认把工作拆成可独立验证的小步骤，不要仅为了减少 Slack 往返次数强行合并成一个大型脚本或一次 `process_start`。
+
+6. 不要自行假设本机环境或固定工具路径。环境发现、SAFE/FULL、安装依赖、浏览器测试、截图和等待规则统一按照 [`CHATGPT_WORKFLOW.md`](CHATGPT_WORKFLOW.md) 执行。
 
 ## 完整工作流
 
