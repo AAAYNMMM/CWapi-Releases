@@ -1,4 +1,4 @@
-# CWapi v1.6.1 用户指南
+# CWapi v1.6.3 用户指南
 
 这份文档只讲第一次安装、配置和开始使用 CWapi。
 
@@ -24,7 +24,7 @@ gh auth status
 
 ## 2. 下载和启动
 
-1. 从 [GitHub Releases](https://github.com/AAAYNMMM/CWapi-Releases/releases) 下载 `CWapi-v1.6.1.zip`。
+1. 从 [GitHub Releases](https://github.com/AAAYNMMM/CWapi-Releases/releases) 下载 `CWapi-v1.6.3.zip`。
 2. 完整解压到任意用户可写目录。
 3. 运行 `CWapi.exe`。
 
@@ -52,13 +52,13 @@ CWapi 使用的 Slack App Token / Bot Token 只配置在 CWapi 中，不需要�
 
 第一次建议告诉 Web GPT：
 
-> 连接 GitHub，读取 `AAAYNMMM/CWapi-Releases` 的 `docs/WEB_GPT_ENTRY.md`，然后使用 CWapi v1.6.1 工作流处理我的项目。
+> 连接 GitHub，读取 `AAAYNMMM/CWapi-Releases` 的 `docs/WEB_GPT_ENTRY.md`，然后使用 CWapi v1.6.3 工作流处理我的项目。
 
 之后直接给开发任务，例如：
 
 > 使用 CWapi 工作流开发 `https://github.com/username/project`，修改后在对应 exact commit 上完成本机测试。
 
-v1.6.1 不需要先在 CWapi 中添加项目。
+v1.6.3 不需要先在 CWapi 中添加项目。
 
 ## 6. 权限
 
@@ -84,6 +84,8 @@ Web GPT 会先尝试 CWapi 已有环境，再检查本机已经安装的环境�
 → Slack 返回真实结果或文件
 → Web GPT 根据结果继续开发
 ```
+
+v1.6.3 会在当前 CWapi 进程内为同一 repository 保留 persistent workspace。Web GPT 应优先拆分成可独立验证的小任务，并自然复用仍有效的编译物、依赖和缓存；不需要为了保留衍生物把所有步骤塞进一个大型脚本。
 
 完整 Web GPT 工作流见 [`CHATGPT_WORKFLOW.md`](CHATGPT_WORKFLOW.md)。
 
