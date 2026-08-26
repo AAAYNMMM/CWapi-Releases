@@ -84,19 +84,19 @@ gh auth status
 
 ## 快速开始
 
-1. 从 [GitHub Releases](https://github.com/AAAYNMMM/CWapi-Releases/releases) 下载 `CWapi-v1.6.1.zip`。
+1. 从 [GitHub Releases](https://github.com/AAAYNMMM/CWapi-Releases/releases) 下载 `CWapi-v1.6.3.zip`。
 2. 完整解压后运行 `CWapi.exe`。
 3. 按 [`docs/SLACK_SETUP.md`](docs/SLACK_SETUP.md) 完成 Slack 配置。
 4. 确认 GitHub CLI 已登录，并在 ChatGPT 中连接 GitHub 和 Slack。
 5. 第一次告诉 Web GPT：
 
-> 连接 GitHub，读取 `AAAYNMMM/CWapi-Releases` 的 `docs/WEB_GPT_ENTRY.md`，然后使用 CWapi v1.6.1 工作流处理我的项目。
+> 连接 GitHub，读取 `AAAYNMMM/CWapi-Releases` 的 `docs/WEB_GPT_ENTRY.md`，然后使用 CWapi v1.6.3 工作流处理我的项目。
 
 之后可以直接给开发任务，例如：
 
 > 使用 CWapi 工作流开发 `https://github.com/username/project`，修改后在对应 exact commit 上完成本机测试。
 
-v1.6.1 不需要在 CWapi 中添加项目。
+v1.6.3 不需要在 CWapi 中添加项目。
 
 ## 权限
 
