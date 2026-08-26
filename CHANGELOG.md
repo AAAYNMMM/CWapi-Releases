@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.6.3 — 2026-08-27
+
+- repository workspace 改为 repository-owned process-lifetime persistent workspace；同仓库请求可复用 `target/`、`node_modules/`、`.venv/`、`build/`、`dist/` 等仍有效衍生物。
+- exact commit 切换继续强制同步 tracked source；ignored/untracked derived state 不做 blanket clean。
+- same repository 通过 lease 串行，different repositories 可以独立并行；long process 与 System fallback 持有 lease 到真正 terminal。
+- normal shutdown / startup sweep 清理 process-lifetime workspace，shared bare mirror 保留。
+- workspace operational error 接入 structured execution + runtime error/GUI failure truth。
+- matching request 的 `mcp.delivery/delivered` 不再覆盖对应 runtime failure；frontend 16/16、TypeScript/Vite 与 Wails production build 已通过。
+- Web GPT 工作流不再建议为了减少往返把独立步骤强行合并成一个脚本或一次 `process_start`；默认采用小而可诊断的任务，persistent workspace 负责衍生资源复用。
+
+正式 Release：`v1.6.3`
+
+```text
+CWapi source/tag commit: d89e019e8a7acf340e8d38694939689b403d6523
+portable: CWapi-v1.6.3.zip
+portable SHA-256: 6d559d0f80a0de3631c1b3bf1685abfbf4b7f11ad7eddbe61af63d0dd8b40c3d
+final privacy: files=996 text_files=177 user_data_included=false
+```
+
+发行仓库已从 `CWapi@d89e019e...` 同步 v1.6.3 **关键运行源码**。发行源码快照有意排除测试文件、`automation/`、开发进度记录以及编译/打包/验证脚本；这些内容继续保留在主开发仓库。
+
+## 1.6.2 — 2026-08-25
+
+- 修复 FULL 模式下晚到 sandbox denial 的 System fallback；`process_status` 仍可暴露 `PERMISSION_DENIED` 并签发一次性 Token。
+- 普通 `PROGRAM_FAILURE` 不升权；permanent policy 与一次性 Token binding 保持不变。
+
+正式 Release：`v1.6.2`
+
 ## 1.6.1 — 2026-08-25
 
 - 协议整体升级为 `[CWapi/MCP/2]` / `cwapi-mcp/2` / v2 schema；route、scope、Token 位置与 virtual tool shape 在幂等 claim 前严格校验。
