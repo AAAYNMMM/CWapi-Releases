@@ -1,4 +1,4 @@
-# CWapi v1.6.1 Web GPT Workflow
+# CWapi v1.6.3 Web GPT Workflow
 
 CWapi 的远程调用方通过配置的 Slack channel 发送 MCP v2 frame。CWapi 不使用 project registry；每个 repository request 自带 GitHub URL 与 exact commit。
 
@@ -7,21 +7,35 @@ CWapi 的远程调用方通过配置的 Slack channel 发送 MCP v2 frame。CWap
 1. 调用方取得目标 GitHub repository URL 与完整 40 位 commit。
 2. 在 Slack 发送唯一 `request_id` 的 `[CWapi/MCP/2][MCP_REQUEST]`。
 3. CWapi 在 claim 前校验 protocol、route、scope、Token 位置与参数 shape。
-4. repository 调用检查 gh readiness，准备共享 mirror 和 request-unique detached worktree。
-5. stock MCP 调用进入 request-scoped ephemeral Codex thread；process tool 由 Go Core 直接处理。
-6. CWapi 保存 terminal response，再投递到原 Slack thread。
-7. 同 id 重投相同 fingerprint 会返回已保存 response；刷新 process 状态使用新 id。
+4. repository 调用按需配置 GitHub credential helper，获取 repository lease，准备共享 mirror 与 repository-owned process-lifetime workspace。
+5. workspace tracked source 同步到 `expected_commit`；ignored/untracked derived state 不主动清除。
+6. stock MCP 调用进入 request-scoped Codex context；`process_start/status/stop` 由 Go Core 直接处理。
+7. CWapi 保存 terminal response，再投递到原 Slack thread；repository terminal 只释放 lease，workspace 保留到 CWapi shutdown。
+8. 同 id 重投相同 fingerprint 会返回已保存 response；刷新 process 状态使用新 id。
 
 ## Process success
 
 ```text
 process_start (new request id, repo+commit)
+  -> acquire repository lease
+  -> sync tracked source to exact commit
   -> Codex safe execution
-  -> completed process record
+  -> completed/running process record
   -> process_status / process_stop (new global request ids)
+  -> terminal -> release repository lease
 ```
 
 start 在 700ms 内完成则直接返回 terminal record，否则返回 stable process_id。长进程后续用 status 刷新；stop 最多同步等待 4 秒，owned cleanup 即使超时也继续。
+
+同一 repository 在前一个 lease 未释放前，后续 repository task 会等待；不同 repository 可以独立并行。
+
+### 任务拆分原则
+
+默认把工作拆成**可独立验证、失败可直接定位的小步骤**。不要仅为了减少 Slack 往返次数，把本来独立的 build、test、copy、upload、commit 等动作强行塞进一个大型脚本或一次 `process_start`。
+
+v1.6.3 的 persistent workspace 会在同一 CWapi 进程内保留同 repository 的有效衍生物，因此拆成多个 repository request 不会自动丢失 `target/`、`node_modules/`、`.venv/`、`build/`、`dist/` 等状态。
+
+只有步骤确实要求共享同一进程内存、临时环境、不可重建的 session/page 状态或原子事务时，才优先合并执行。**可诊断性、正确性与简单性优先于减少往返次数。**
 
 ### 可执行文件与运行环境解析
 
@@ -44,62 +58,52 @@ start 在 700ms 内完成则直接返回 terminal record，否则返回 stable p
 
 ## 衍生资源复用规则
 
-v1.6.1 可以复用已经产生且仍然有效的衍生资源，但复用范围受 request-unique worktree 生命周期限制。**复用优先于重复构建，但正确性优先于复用。**
+v1.6.3 中，同一 repository 在一个 CWapi 进程生命周期内使用同一个 persistent workspace。**复用优先于重复构建，但正确性优先于复用。**
 
 ### 可以复用
 
-- **同一个仍存活的 repository worktree 内的资源。** 编译物、中间文件、生成代码、依赖目录、项目内缓存等，只要仍位于当前存活 worktree 中且输入没有变化，应优先复用，不要无理由重复生成。
-- **同一个 `process_start` 执行链中的产物。** 如果 `build -> test -> package -> run` 依赖同一批编译结果，优先用一个仓库脚本或一个 `process_start` 完成连续步骤，让后续步骤直接使用前面生成的资源；不要为了每一步都新开 repository request 而主动丢失前一步产物。
-- **仍为 `starting` / `running` 的长期进程或服务。** dev server、test server、watcher、localhost 服务等已经启动且与当前 commit/config 相符时，后续浏览器或客户端检查应复用现有服务。启动同类新进程前先用 `process_status` 确认旧进程是否仍可用。
-- **System Token fallback 保留的原 dirty tree。** FULL 模式下 Codex 因权限被拒并进入同一 invocation 的 System fallback 时，CWapi 会保留原 worktree；不要仅因为 backend 从 Codex 切换到 System 就重新构建已经存在且仍有效的中间资源。
-- **CWapi 自己维护的 Git mirror。** repository mirror 会由 CWapi 自动复用。调用方不应为了“缓存 Git”自行额外 clone/fetch 一份仓库。
+- 同一 repository workspace 内的编译物、中间文件、生成代码、依赖目录和项目内缓存；
+- 同一长期进程仍然有效的 dev server、test server、watcher 等状态；
+- Codex denial 后同一 invocation 的 System fallback 所使用的原 workspace；
+- CWapi 自己维护的 shared bare mirror；
+- 工具自身经验证仍与当前输入匹配的缓存。
 
-### 不允许假定可复用
+### exact commit 切换
 
-- **不同 repository request 之间的 worktree 文件不能直接复用。** 每个新的 repository request 使用新的 request-unique detached worktree；原 process 进入 terminal 状态后，其 worktree cleanup 会删除其中的编译物、`dist/`、`target/`、`.venv/`、`node_modules/`、临时索引等未提交资源。
-- 即使 `repository_url` 和 `expected_commit` 完全相同，也不能因为上一条 request 曾生成过某个路径，就在下一条 request 中直接引用该旧路径。
-- 重发相同 `request_id` 只会按幂等规则返回已保存 response，不代表旧 worktree 会重新开放，也不是衍生资源缓存机制。
-- stock MCP 的不同 request 同样不能假定共享 repository 文件状态、浏览器页面、tab、locator 或其它 session state。
-- 本机工具自己的全局缓存如果碰巧可读，可以由工具自然命中，但它不属于 CWapi 保证的复用资源；不得依赖未验证的全局缓存来跳过必要的构建或校验。
+新的同 repository request 可以携带不同 `expected_commit`。CWapi 获取 repository lease 后会强制同步 tracked source 到 exact commit，并校验 HEAD；不会主动 `git clean` ignored/untracked derived state。
 
-### 必须失效并重新生成
+如果旧衍生物与新的 tracked source 冲突，或依赖 lockfile、build config、目标平台、工具链版本等已经变化，应使用项目自己的清理/重建命令。不要为了“缓存”绕过 exact commit，也不要假定无法证明有效性的旧产物仍然正确。
 
-出现以下任一情况，应把相关衍生资源视为失效：
-
-- `expected_commit` 改变，或相关源码已经变化；
-- dependency lockfile、build config、编译参数、目标平台、工具链版本或影响结果的环境发生变化；
-- 原拥有该资源的 process 已进入 `completed` / `failed` / `stopped`，因此对应 worktree 已进入 cleanup；
-- 无法证明资源对应当前输入，或复用可能掩盖测试/构建正确性问题。
-
-不得为了制造跨请求缓存而主动切换 FULL，把编译物或缓存散落到任意用户目录。用户明确需要长期保存某个产物时，应把“持久化产物”作为单独任务处理；v1.6.1 本身没有 CWapi 管理的跨 repository-request build artifact cache。
+CWapi shutdown 或下一次 startup 会清理 process-lifetime workspace；shared mirror 保留。
 
 ## Permission fallback
 
 ```text
 full_access local mode
-  -> Codex structured PERMISSION_DENIED
+  -> Codex first
+  -> structured PERMISSION_DENIED
   -> blocked response + 60s System Token
   -> caller sends same repo/commit/process args with new request_id + Token
-  -> Core re-resolves final invocation in original dirty tree
+  -> Core re-resolves final invocation in original repository workspace
   -> binding/policy pass, one-time consume
   -> System backend process record
 ```
 
-binding mismatch 不消费 Token，修正后仍必须换新 request_id。第 4 个 active Token 返回 `SYSTEM_TOKEN_LIMIT_REACHED`，不会驱逐前三个。
+只有真实 `PERMISSION_DENIED` 才进入 System fallback；普通 `PROGRAM_FAILURE` 不升权。binding mismatch 不消费 Token，第 4 个 active Token 返回 `SYSTEM_TOKEN_LIMIT_REACHED`，不会驱逐前三个。
 
 ## Stock MCP
 
 - status-list 是 global 且 params 为空；
 - resource/tool 可 global 或 repository；
-- caller 不提供 `threadId`；CWapi 管理 ephemeral context；
+- caller 不提供 `threadId`；CWapi 管理 request-scoped context；
 - `server=cwapi` 只支持 process_start/status/stop，不进入 stock relay；
 - 不要假定两个不同 request_id 的 stock MCP 调用共享浏览器页面、tab、locator 或其它 session state。
 
 ### Playwright 多步操作
 
-stock MCP 使用 request-scoped ephemeral context。需要完成“打开页面 -> 填表 -> 点击 -> 断言 -> 截图”这类连续操作时，优先在一次 Playwright 调用中完成整段动作，例如一次 `browser_run_code_unsafe` 内导航、交互和断言。
+stock MCP 使用 request-scoped context。需要完成“打开页面 -> 填表 -> 点击 -> 断言 -> 截图”这类连续操作时，优先在一次 Playwright 调用中完成整段动作。
 
-如果拆成多个 request，则后续 request 必须自行重新建立所需页面状态。不要把前一条 `browser_navigate` 成功当成下一条 `browser_fill_form` 一定还能看到同一个页面。
+这是“任务拆分原则”的明确例外：如果拆成多个 request，后续 request 必须自行重新建立页面状态。不要把前一条 `browser_navigate` 成功当成下一条 `browser_fill_form` 一定还能看到同一个页面。
 
 ### 截图经 Slack 返回
 
@@ -129,10 +133,10 @@ stock MCP 使用 request-scoped ephemeral context。需要完成“打开页面 
 
 - 为每个新动作/状态快照生成新 request_id；
 - Windows path 在协议中使用 `/`；
-- 优先复用当前仍存活且输入一致的衍生资源，不无理由重复 build/install/start；
-- 不把已结束 request 的 worktree 文件当作跨请求缓存；
+- 默认采用小而可诊断的任务，不以减少 Slack 往返次数为主要优化目标；
+- 优先复用同 repository persistent workspace 中输入一致的衍生资源，不无理由重复 build/install/start；
 - 只在 configured channel 传递短期 Token；
 - 不把 Slack response 里的 Token 复制到 issue、日志或长期文档；
-- System fallback 前确认该直接命令确实需要当前 Windows 用户权限；
+- System fallback 前确认错误确实属于 sandbox permission denial，而不是普通程序失败；
 - 安装新依赖前确认用户已经选择 `FULL` 权限下由 Web GPT 安装，或选择自行手动安装；
 - 需要二进制 MCP 结果时让 tool 返回 bytes/image/resource content，不要求 CWapi 根据文本路径自行读取本机文件。
