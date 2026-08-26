@@ -37,6 +37,14 @@ v1.6.3 的 persistent workspace 会在同一 CWapi 进程内保留同 repository
 
 只有步骤确实要求共享同一进程内存、临时环境、不可重建的 session/page 状态或原子事务时，才优先合并执行。**可诊断性、正确性与简单性优先于减少往返次数。**
 
+### Web GPT 必须理解的 workspace 模型
+
+- **把 request 当作执行步骤，不要把 request 当作 workspace 生命周期。** 同一 repository 的后续 request 会重新进入同一个 process-lifetime workspace。
+- tracked source 是 `expected_commit` 的本地投影；每个 repository request prepare 都可能重新同步 tracked 文件。不要依赖未提交的 tracked source 修改跨 request 保留；需要持久化的源码变更应先写入 GitHub，并在后续 request 使用新的 exact commit。
+- ignored/untracked derived state 才是主要的跨 request 本地复用对象，例如编译缓存、依赖目录、生成文件、迁移临时目录和其它明确的辅助状态。
+- 源码迁移、打包整理等任务可以拆成“准备目标 -> 选择/复制 -> 检查 -> commit -> push”等多个短 request。中间步骤失败时优先从现有 workspace 状态继续，不要无理由从头重做整个链路。
+- 禁止的是为了绕过当前 repository 的 managed workspace 而重复 clone 同一 repository。跨 repository 迁移确实需要操作第二个 repository 时，可以在受控 workspace 内使用明确的临时 helper clone，或将目标 repository 作为独立 repository request 处理。
+
 ### 可执行文件与运行环境解析
 
 `process_start` 使用 CWapi 启动时冻结的执行环境。不要假定用户交互式终端中的 PATH 与 CWapi 看到的 PATH 相同，也不要把某台机器上的固定绝对路径当成通用规则。
@@ -135,6 +143,7 @@ stock MCP 使用 request-scoped context。需要完成“打开页面 -> 填表 
 - Windows path 在协议中使用 `/`；
 - 默认采用小而可诊断的任务，不以减少 Slack 往返次数为主要优化目标；
 - 优先复用同 repository persistent workspace 中输入一致的衍生资源，不无理由重复 build/install/start；
+- 不为绕过当前 repository 的 managed workspace 而重复 clone/fetch 同一 repository；跨 repository 任务按上面的 workspace 模型处理；
 - 只在 configured channel 传递短期 Token；
 - 不把 Slack response 里的 Token 复制到 issue、日志或长期文档；
 - System fallback 前确认错误确实属于 sandbox permission denial，而不是普通程序失败；
