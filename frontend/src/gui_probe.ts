@@ -32,8 +32,8 @@ async function probeFirstRun(checks: string[]) {
   for (const label of ["App Token", "Bot Token", "Channel ID"]) {
     if (!document.querySelector(`input[aria-label="${label}"]`)) throw new Error(`GUI_PROBE_FIRST_RUN_FIELD_MISSING:${label}`);
   }
-  if (!document.body.textContent?.includes("v1.6.1")) throw new Error("GUI_PROBE_FIRST_RUN_VERSION_MISSING");
-  checks.push("single-page", "first-run-slack", "version-1.6.1");
+  if (!document.body.textContent?.includes("v1.6.2")) throw new Error("GUI_PROBE_FIRST_RUN_VERSION_MISSING");
+  checks.push("single-page", "first-run-slack", "version-1.6.2");
 }
 
 async function probeWorkbench(checks: string[]) {

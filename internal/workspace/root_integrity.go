@@ -7,10 +7,10 @@ import (
 	"strings"
 )
 
-func (m *Manager) validateWorktreeRootLocked() (string, error) {
-	root, exists, err := validateDirectoryRoot(filepath.Join(m.root, "git", "worktrees"), true)
+func (m *Manager) validateRepositoryRootLocked() (string, error) {
+	root, exists, err := validateDirectoryRoot(filepath.Join(m.root, "git", "repositories"), true)
 	if err != nil || !exists {
-		return "", errors.New("WORKSPACE_WORKTREE_ROOT_INTEGRITY_INVALID")
+		return "", errors.New("WORKSPACE_REPOSITORY_ROOT_INTEGRITY_INVALID")
 	}
 	return root, nil
 }

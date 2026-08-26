@@ -74,7 +74,9 @@ func (r *Runtime) Start(_ context.Context, request protocol.MCPRequest, argument
 		ExpectedCommit: request.ExpectedCommit, WorkingDirectory: workingDirectory,
 		Cleanup: lease.registryDone,
 		Launch: func(ctx context.Context, processID string, _ *Tails) (Handle, error) {
-			return r.startCodex(ctx, processID, execution.CWD, final, window)
+			return r.startCodex(ctx, processID, execution.CWD, final, window, func() (string, error) {
+				return r.issuePermissionToken(request, execution, final, lease, attemptMode)
+			})
 		},
 	})
 	held := window.close()
@@ -136,27 +138,33 @@ func (r *Runtime) startSystemFallback(request protocol.MCPRequest, arguments pro
 	return processRecordResponse(request.RequestID, result.Record)
 }
 
-func (r *Runtime) permissionDenied(request protocol.MCPRequest, execution gateway.MCPExecutionContext, final invocation.Final, lease *workspaceLease, attemptMode string, held bool) protocol.MCPResponse {
-	if !held {
-		return processError(request.RequestID, protocol.MCPStatusBlocked, FailurePermission, "Codex denied this invocation")
-	}
+func (r *Runtime) issuePermissionToken(request protocol.MCPRequest, execution gateway.MCPExecutionContext, final invocation.Final, lease *workspaceLease, attemptMode string) (string, error) {
 	token, err := r.authorization.Issue(attemptMode, grantContext{
 		RepositoryURL: request.RepositoryURL, Repository: execution.Repository,
 		ExpectedCommit: request.ExpectedCommit, RepositoryRoot: execution.CWD,
 		Final: final, Lease: lease,
 	})
-	if err != nil {
+	if err != nil || token == "" {
 		lease.releaseHeld()
+	}
+	return token, err
+}
+
+func (r *Runtime) permissionDenied(request protocol.MCPRequest, execution gateway.MCPExecutionContext, final invocation.Final, lease *workspaceLease, attemptMode string, held bool) protocol.MCPResponse {
+	if !held {
+		return processError(request.RequestID, protocol.MCPStatusBlocked, FailurePermission, "Codex sandbox blocked this invocation")
+	}
+	token, err := r.issuePermissionToken(request, execution, final, lease, attemptMode)
+	if err != nil {
 		if errors.Is(err, ErrTokenLimit) {
 			return processError(request.RequestID, protocol.MCPStatusBlocked, ErrTokenLimit.Error(), "System Token limit reached")
 		}
 		return processError(request.RequestID, protocol.MCPStatusFailed, FailureUnknown, err.Error())
 	}
 	if token == "" {
-		lease.releaseHeld()
-		return processError(request.RequestID, protocol.MCPStatusBlocked, FailurePermission, "Codex denied this invocation")
+		return processError(request.RequestID, protocol.MCPStatusBlocked, FailurePermission, "Codex sandbox blocked this invocation")
 	}
-	response := processError(request.RequestID, protocol.MCPStatusBlocked, FailurePermission, "Codex denied this invocation; retry with the one-time System Token")
+	response := processError(request.RequestID, protocol.MCPStatusBlocked, FailurePermission, "Codex sandbox blocked this invocation; retry with the one-time System Token")
 	response.SystemToken = token
 	return response
 }
@@ -165,6 +173,15 @@ func (r *Runtime) Status(_ context.Context, requestID, processID string) protoco
 	record, err := r.registry.Status(processID)
 	if err != nil {
 		return processError(requestID, protocol.MCPStatusFailed, processErrorCode(err), err.Error())
+	}
+	if record.Error != nil && record.Error.Code == FailurePermission {
+		if token, tokenErr := r.registry.systemToken(processID); tokenErr == nil && token != "" {
+			if _, peekErr := r.authorization.Peek(token); peekErr == nil {
+				response := processError(requestID, protocol.MCPStatusBlocked, FailurePermission, "Codex sandbox blocked this invocation; retry with the one-time System Token")
+				response.SystemToken = token
+				return response
+			}
+		}
 	}
 	return processRecordResponse(requestID, record)
 }

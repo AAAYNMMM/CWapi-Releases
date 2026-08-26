@@ -7,12 +7,14 @@ import (
 	"github.com/AAAYNMMM/CWapi/internal/invocation"
 )
 
+const SandboxBlockedExitCode = 197
+
 type codexHandle struct {
 	inner *codex.CommandHandle
 	done  chan Completion
 }
 
-func (r *Runtime) startCodex(ctx context.Context, processID, repositoryRoot string, final invocation.Final, window *denialWindow) (Handle, error) {
+func (r *Runtime) startCodex(ctx context.Context, processID, repositoryRoot string, final invocation.Final, window *denialWindow, lateToken func() (string, error)) (Handle, error) {
 	inner, err := r.codex.StartCommand(ctx, codex.CommandSpec{
 		ProcessID: processID, Executable: final.Executable, Argv: final.Argv,
 		CWD: final.CWD, WritableRoot: repositoryRoot, Environment: final.Environment,
@@ -33,10 +35,15 @@ func (r *Runtime) startCodex(ctx context.Context, processID, repositoryRoot stri
 			} else {
 				exitCode := result.ExitCode
 				completion.ExitCode = &exitCode
-				if exitCode == 5 {
-					discard := window.denied()
-					completion.Failure = &Failure{Code: FailurePermission, Message: "Codex sandbox denied the invocation"}
-					completion.DiscardRecord = discard
+				if sandboxBlockedExitCode(exitCode) {
+					held, immediate := window.denied()
+					completion.Failure = &Failure{Code: FailurePermission, Message: "Codex sandbox blocked the invocation"}
+					completion.DiscardRecord = held && immediate
+					if held && !immediate && lateToken != nil {
+						if token, tokenErr := lateToken(); tokenErr == nil {
+							completion.SystemToken = token
+						}
+					}
 				}
 			}
 		}
@@ -44,6 +51,10 @@ func (r *Runtime) startCodex(ctx context.Context, processID, repositoryRoot stri
 		close(handle.done)
 	}()
 	return handle, nil
+}
+
+func sandboxBlockedExitCode(exitCode int) bool {
+	return exitCode == 5 || exitCode == SandboxBlockedExitCode
 }
 
 func (h *codexHandle) Done() <-chan Completion { return h.done }

@@ -7,10 +7,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/AAAYNMMM/CWapi/internal/config"
 	"github.com/AAAYNMMM/CWapi/internal/gateway"
+	"github.com/AAAYNMMM/CWapi/internal/observability"
 	"github.com/AAAYNMMM/CWapi/internal/repository"
 	"github.com/AAAYNMMM/CWapi/internal/workspace"
 )
@@ -18,9 +18,10 @@ import (
 type mcpContextResolver struct {
 	workspaces    *workspace.Manager
 	gitExecutable string
+	observability *observability.Hub
 }
 
-func newMCPContextResolver(manager *config.Manager, dataRoot string) (*mcpContextResolver, error) {
+func newMCPContextResolver(manager *config.Manager, dataRoot string, hub *observability.Hub) (*mcpContextResolver, error) {
 	if manager == nil {
 		return nil, errors.New("MCP_CONTEXT_CONFIG_REQUIRED")
 	}
@@ -28,11 +29,11 @@ func newMCPContextResolver(manager *config.Manager, dataRoot string) (*mcpContex
 	if err != nil {
 		return nil, err
 	}
-	resolver := &mcpContextResolver{
+	return &mcpContextResolver{
 		workspaces:    workspaces,
 		gitExecutable: resolveGitExecutable(),
-	}
-	return resolver, nil
+		observability: hub,
+	}, nil
 }
 
 func (r *mcpContextResolver) sweep(ctx context.Context) []error {
@@ -42,12 +43,21 @@ func (r *mcpContextResolver) sweep(ctx context.Context) []error {
 	return r.workspaces.Sweep(ctx, r.gitExecutable)
 }
 
+func (r *mcpContextResolver) cleanup(ctx context.Context) []error {
+	if r == nil || r.workspaces == nil {
+		return []error{errors.New("MCP_CONTEXT_RESOLVER_UNAVAILABLE")}
+	}
+	return r.workspaces.Cleanup(ctx, r.gitExecutable)
+}
+
 func (r *mcpContextResolver) PrepareMCPContext(ctx context.Context, requestID, repositoryURL, expectedCommit string) (gateway.MCPExecutionContext, func(), error) {
 	if r == nil || r.workspaces == nil {
 		return gateway.MCPExecutionContext{}, nil, errors.New("MCP_CONTEXT_RESOLVER_UNAVAILABLE")
 	}
 	if strings.TrimSpace(r.gitExecutable) == "" {
-		return gateway.MCPExecutionContext{}, nil, errors.New("MCP_GIT_RUNTIME_UNAVAILABLE")
+		err := errors.New("MCP_GIT_RUNTIME_UNAVAILABLE")
+		r.logWorkspaceError("repository.prepare", requestID, "", err)
+		return gateway.MCPExecutionContext{}, nil, err
 	}
 	identity, err := repository.Parse(repositoryURL)
 	if err != nil {
@@ -64,12 +74,13 @@ func (r *mcpContextResolver) PrepareMCPContext(ctx context.Context, requestID, r
 		expectedCommit,
 	)
 	if err != nil {
+		r.logWorkspaceError("repository.prepare", requestID, identity.Repository, err)
 		return gateway.MCPExecutionContext{}, nil, err
 	}
 	release := func() {
-		cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		_ = r.workspaces.Remove(cleanup, r.gitExecutable, prepared)
+		if releaseErr := r.workspaces.Release(prepared); releaseErr != nil {
+			r.logWorkspaceError("repository.release", requestID, identity.Repository, releaseErr)
+		}
 	}
 	return gateway.MCPExecutionContext{
 		RepositoryURL:  identity.NormalizedURL,
@@ -79,9 +90,25 @@ func (r *mcpContextResolver) PrepareMCPContext(ctx context.Context, requestID, r
 	}, release, nil
 }
 
-// configureRepositoryCredentialHelper keeps private repository authentication
-// lazy and request-scoped. It never runs a GitHub CLI version/auth probe and
-// does not create a separate readiness state; Git reports credential failures.
+func (r *mcpContextResolver) logWorkspaceError(operation, requestID, repositoryName string, err error) {
+	if r == nil || r.observability == nil || err == nil {
+		return
+	}
+	fields := map[string]any{"operation": operation}
+	if requestID = strings.TrimSpace(requestID); requestID != "" {
+		fields["request_id"] = requestID
+	}
+	if repositoryName = strings.TrimSpace(repositoryName); repositoryName != "" {
+		fields["repository"] = repositoryName
+	}
+	_, _ = r.observability.LogRuntime(context.Background(), observability.RuntimeInput{
+		Level:     "error",
+		Component: "workspace",
+		Message:   operation + ": " + err.Error(),
+		Fields:    fields,
+	})
+}
+
 func (r *mcpContextResolver) configureRepositoryCredentialHelper() {
 	if r == nil || r.workspaces == nil {
 		return

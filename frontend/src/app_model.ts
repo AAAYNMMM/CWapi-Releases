@@ -69,12 +69,30 @@ function dataValue(value: unknown): string {
   try { return JSON.stringify(value); } catch { return JSON.stringify(String(value)); }
 }
 
-function executionData(event: app.ExecutionEventSnapshot): string {
-  let data: Record<string, unknown> = {};
+function jsonObject(value: string): Record<string, unknown> {
   try {
-    const parsed = JSON.parse(event.data_json || "{}");
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) data = parsed;
-  } catch { data = { data_json: event.data_json }; }
+    const parsed = JSON.parse(value || "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+  return {};
+}
+
+function requestID(value: string): string {
+  const candidate = jsonObject(value).request_id;
+  return typeof candidate === "string" ? candidate : "";
+}
+
+function deliveryAcknowledgesRuntimeFailure(execution: app.ExecutionEventSnapshot, runtime: app.RuntimeLogSnapshot): boolean {
+  if (execution.kind !== "mcp.delivery" || execution.status !== "delivered") return false;
+  const executionRequestID = requestID(execution.data_json);
+  const runtimeRequestID = requestID(runtime.fields_json);
+  return executionRequestID !== "" && executionRequestID === runtimeRequestID;
+}
+
+function executionData(event: app.ExecutionEventSnapshot): string {
+  const data = jsonObject(event.data_json);
   const fields: Record<string, unknown> = { status: event.status, kind: event.kind };
   if (event.step_id) fields.step = event.step_id;
   if (event.duration_ms) fields.duration_ms = event.duration_ms;
@@ -86,11 +104,7 @@ function executionData(event: app.ExecutionEventSnapshot): string {
 }
 
 function runtimeData(record: app.RuntimeLogSnapshot): string {
-  let data: Record<string, unknown> = {};
-  try {
-    const parsed = JSON.parse(record.fields_json || "{}");
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) data = parsed;
-  } catch { data = { fields_json: record.fields_json }; }
+  const data = jsonObject(record.fields_json);
   const fields: Record<string, unknown> = { level: record.level, message: record.message };
   Object.assign(fields, data);
   return Object.entries(fields)
@@ -127,7 +141,12 @@ export function buildLatestRecord(snapshot: DesktopState | null, local: LatestRe
   const candidates: LatestRecord[] = local ? [local] : [];
   if (snapshot) {
     candidates.push(...processRecords(activeProcess(snapshot.processes)));
-    if (snapshot.latest_execution) candidates.push({
+    const deliveryMasksMatchingFailure = Boolean(
+      snapshot.latest_execution
+      && snapshot.latest_runtime_error
+      && deliveryAcknowledgesRuntimeFailure(snapshot.latest_execution, snapshot.latest_runtime_error),
+    );
+    if (snapshot.latest_execution && !deliveryMasksMatchingFailure) candidates.push({
       timestamp: snapshot.latest_execution.timestamp,
       clock: clock(snapshot.latest_execution.timestamp),
       source: "event",

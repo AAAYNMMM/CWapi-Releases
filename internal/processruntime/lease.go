@@ -87,13 +87,14 @@ func newDenialWindow(lease *workspaceLease) *denialWindow {
 	return &denialWindow{open: true, lease: lease}
 }
 
-func (w *denialWindow) denied() bool {
+func (w *denialWindow) denied() (held bool, immediate bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.open && !w.held {
+	immediate = w.open
+	if !w.held {
 		w.held = w.lease.hold()
 	}
-	return w.held
+	return w.held, immediate
 }
 
 func (w *denialWindow) close() bool {

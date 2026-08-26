@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/AAAYNMMM/CWapi/internal/buildinfo"
 	"github.com/AAAYNMMM/CWapi/internal/codex"
@@ -99,7 +100,7 @@ func NewServiceWithPaths(configPath, statePath string) (*Service, error) {
 		codexHost.Close()
 		return fail(err)
 	}
-	contextResolver, err := newMCPContextResolver(manager, dataRoot)
+	contextResolver, err := newMCPContextResolver(manager, dataRoot, hub)
 	if err != nil {
 		processRuntime.Close()
 		codexHost.Close()
@@ -130,7 +131,7 @@ func NewServiceWithPaths(configPath, statePath string) (*Service, error) {
 	hub.SetComponent("codex-mcp", "healthy", "stock MCP relay and Core process runtime attached")
 	sweepFailures := contextResolver.sweep(context.Background())
 	if len(sweepFailures) == 0 {
-		hub.SetComponent("workspace", "healthy", "ephemeral worktree root swept")
+		hub.SetComponent("workspace", "healthy", "stale repository workspaces swept")
 	} else {
 		hub.SetComponent("workspace", "degraded", "one or more stale workspace items need attention")
 		for _, sweepErr := range sweepFailures {
@@ -146,7 +147,7 @@ func NewServiceWithPaths(configPath, statePath string) (*Service, error) {
 		Level:     "info",
 		Component: "core",
 		Message:   "Go Core MCP relay, stock Codex app-server and Slack initialized",
-		Fields:    map[string]any{"stage": "v1.6.1"},
+		Fields:    map[string]any{"stage": "v" + buildinfo.Version},
 	}); err != nil {
 		processRuntime.Close()
 		codexHost.Close()
@@ -193,6 +194,19 @@ func (s *Service) Close() error {
 	if s.processRuntime != nil {
 		s.processRuntime.Close()
 	}
+	if s.contextResolver != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		failures := s.contextResolver.cleanup(cleanupCtx)
+		cancel()
+		if len(failures) == 0 {
+			s.observability.SetComponent("workspace", "healthy", "repository workspaces cleaned on shutdown")
+		} else {
+			s.observability.SetComponent("workspace", "degraded", "one or more repository workspaces could not be cleaned on shutdown")
+			for _, cleanupErr := range failures {
+				s.recordOperationalError("workspace", "shutdown.cleanup", cleanupErr)
+			}
+		}
+	}
 	if s.codexHost != nil {
 		s.codexHost.Close()
 	}
@@ -210,6 +224,6 @@ func (s *Service) RuntimeSnapshot() RuntimeSnapshot {
 	return RuntimeSnapshot{
 		Version: buildinfo.Version, SourceCommit: buildinfo.Commit(),
 		Architecture: "go-core+wails-v2+react-typescript", Core: "go", Desktop: "wails-v2",
-		Platform: runtime.GOOS + "/" + runtime.GOARCH, Stage: "v1.6.1",
+		Platform: runtime.GOOS + "/" + runtime.GOARCH, Stage: "v" + buildinfo.Version,
 	}
 }
