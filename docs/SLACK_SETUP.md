@@ -1,4 +1,4 @@
-# CWapi v1.6.1 Slack 配置教程
+# CWapi v1.6.3 Slack 配置教程
 
 这份文档是 **CWapi 的 Slack 配置教程**。第一次创建 Slack App、配置 scopes、Socket Mode、token 和 Channel ID，都按这里做。
 
@@ -131,7 +131,7 @@ https://app.slack.com/client/T01234567/C0123456789
 
 ## 9. 填入 CWapi
 
-v1.6.1 使用固定单页 GUI。打开底部 Slack 卡片的配置 sheet，填写：
+v1.6.3 使用固定单页 GUI。打开底部 Slack 卡片的配置 sheet，填写：
 
 ```text
 App Token   = xapp-...
@@ -169,7 +169,7 @@ Bot 是否在频道内
 
 ## 12. 最终实际通信测试
 
-v1.6.1 **没有 `projects/list`**。
+v1.6.3 **没有 `projects/list`**。
 
 第一次可以先做 global MCP catalog：
 
