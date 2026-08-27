@@ -45,21 +45,116 @@ v1.6.3 的 persistent workspace 会在同一 CWapi 进程内保留同 repository
 - 源码迁移、打包整理等任务可以拆成“准备目标 -> 选择/复制 -> 检查 -> commit -> push”等多个短 request。中间步骤失败时优先从现有 workspace 状态继续，不要无理由从头重做整个链路。
 - 禁止的是为了绕过当前 repository 的 managed workspace 而重复 clone 同一 repository。跨 repository 迁移确实需要操作第二个 repository 时，可以在受控 workspace 内使用明确的临时 helper clone，或将目标 repository 作为独立 repository request 处理。
 
-### Repository source inspection path
+### Repository search optimization：当前事实与确定设计
 
-在已经取得 `repository_url + expected_commit` 并进入 CWapi 本地开发链后，**同一 repository / same exact commit 的重复源码检查与文本搜索应优先复用 CWapi persistent workspace，而不是为了读同一份 tracked source 反复绕回 GitHub Connector。** GitHub 继续负责提供远端源码真相、取得新的 exact commit，以及 PR / Issue / CI / Review / Release 等 GitHub-native 信息。
+这里必须区分**v1.6.3 已发布能力**和**后续已经确定的 search-only 优化方向**。发行仓库的文档不能把尚未实现的工具写成当前可调用协议。
 
-当前 v1.6.3 **还没有专用的 `repo_read` / `repo_search` virtual tool**。现阶段已经真实验证的可用办法，是发送 repository-scoped、只读的 `process_start`，在 CWapi 管理的 workspace 内执行确定性的读取/搜索命令，例如读取小文件、查看指定范围或按字符串搜索。2026-08-27 的真实链探测证明：第一个 request 在 workspace 留下的 untracked marker，在 request terminal 后由第二个新 request 继续读到，同时 tracked `README.md` 仍对应同一个 `expected_commit`，说明本地 workspace 可以承担跨 request 的源码检查路径。
+#### v1.6.3 当前事实
 
-必须同时遵守当前能力边界：
+当前 v1.6.3：
 
-- `process_start` 仍经过 Codex safe backend，因此这是**功能可用的本地读取路径**，不是对单个小文件延迟的绝对保证；
-- public process record 的 `stdout_tail` / `stderr_tail` 各自只有最近 8192 bytes，不能把 `process_start` 当成通用的大文件传输接口；
-- 当前 stock MCP 只提供 Playwright，没有现成 filesystem read server；需要完整大文件、超出 process tail 的源码或结构化 GitHub 内容时，仍可直接使用 GitHub Connector；
-- 读取 tracked source 时只把 `expected_commit` 对应内容视为源码真相；ignored/untracked 内容属于本地 derived state，除非任务明确就是检查这些本地产物；
-- 不要为了“本地读取”额外 clone/fetch 同一 repository。repository request 自己负责 prepare；mirror 已有 commit 时不会重复 fetch，workspace 已存在时会继续复用同一 process-lifetime workspace。
+- `server=cwapi` 仍只支持 `process_start`、`process_status`、`process_stop`；
+- **没有** `repo_search`、`repo_read`、filesystem MCP 或其它专用 repository query tool；
+- 当前 stock MCP 实际只提供 Playwright，没有文件系统读取/搜索 server；
+- GitHub Connector 仍负责正常的源码搜索、完整文件读取、远端写入，以及 PR / Issue / CI / Review / Release 等 GitHub-native 信息；
+- repository request 仍以 GitHub HTTPS `repository_url` + 完整 40 位 `expected_commit` 作为远端源码身份与 exact-commit 真相。
 
-因此当前规则是**部分替代**：短文本检查、搜索和本地执行链上下文优先走 CWapi workspace；远端元数据、远端写入以及超过当前本地返回边界的完整源码读取继续走 GitHub。后续若新增 Go Core 直接实现的只读 `repo_read/repo_search` virtual tool，再把完整源码读取默认切到 CWapi，而不需要给 CWapi 增加 Agent。
+2026-08-27 做过一次真实 Slack -> CWapi 链验证：第一个 repository request 在 workspace 写入临时 untracked marker 并读取 tracked `README.md`；request terminal 后，第二个新的 request 使用同一 repository / same `expected_commit`，成功重新进入同一个 process-lifetime workspace、读到该 marker，并继续看到对应 exact commit 的 tracked source。随后 marker 已清理。
+
+这次验证只证明 persistent workspace 可以作为本地 repository 搜索的数据源，并证明同一个已经准备好的 repo/commit 没有必要为了“定位源码在哪”再次经过 GitHub Connector。它**不代表** v1.6.3 已经发布了 repository search API。
+
+使用 `process_start` + `findstr` / `rg` / 类似命令可以作为调试、兼容性验证或临时诊断手段，但仍经过 Codex safe backend，并受 process output tail 等 process 语义约束。因此它不应成为正式搜索热路径，也不应被扩展成 CWapi 文件读取协议。
+
+#### 已确定的优化边界：只搜索，不读取完整源码
+
+后续 repository query 优化只需要增加一个轻量、确定性的 **`repo_search`** 能力。CWapi 不需要 Agent，也不需要实现 `repo_read`。
+
+目标分工：
+
+```text
+Web GPT
+  -> CWapi repo_search：本地 persistent workspace 搜索定位
+       -> 返回 path + line + bounded snippet
+  -> GitHub Connector：精确读取命中的完整文件
+  -> Web GPT：理解、推理、规划
+  -> GitHub：源码写入与新的 exact commit
+  -> CWapi：在 exact commit 上执行 build / test / run
+```
+
+CWapi 负责的搜索阶段包括：
+
+- 搜索函数名、类型名、变量名、错误文本、配置键和普通字符串；
+- 找出相关文件路径；
+- 返回命中行号；
+- 返回少量上下文 snippet，帮助 Web GPT 判断哪些文件值得进一步读取。
+
+CWapi 不负责：
+
+- 完整源码文件读取；
+- 大文件或多文件内容传输；
+- 源码修改与 commit/push；
+- branch / commit history；
+- PR / Issue / Review / Actions / CI / Release；
+- 任何需要理解自然语言意图的 Agent 行为。
+
+搜索结束后，Web GPT 应通过 GitHub Connector 精准读取已经命中的少量文件。这样优化的是“GitHub search -> 猜文件 -> 再 search -> 再 fetch”的反复循环，而不是把 GitHub Connector 整体搬进 CWapi。
+
+#### `repo_search` 的目标执行路径
+
+正式实现应当是 Go Gateway/Core 的 repository-scoped virtual tool，不使用 `process_start` 包装搜索命令：
+
+```text
+Web GPT
+  -> Slack MCP v2
+  -> Go Gateway
+  -> repository lease
+  -> Prepare(repository_url, expected_commit)
+  -> existing persistent workspace
+  -> deterministic local text search
+  -> bounded path / line / snippet result
+  -> Slack MCP v2 response
+```
+
+目标约束：
+
+- 不创建模型 turn；
+- 不需要 CWapi Agent；
+- 不通过 Codex command backend 做搜索；
+- 不需要 FULL / System Token；
+- 不为了搜索额外 clone 同一 repository；
+- exact commit 已在 mirror/workspace 可用时，不因为搜索本身访问 GitHub；
+- exact commit 本地不存在时，只复用现有 repository prepare 的正常 mirror fetch 行为；
+- 搜索期间继续遵守 repository lease，不能在同一 workspace 的 tracked source 正被其它任务修改或切换时读取不确定状态；
+- 第一版保持普通确定性文本搜索，不需要语义索引、embedding、AST Agent 或另一个 LLM。
+
+`repo_search` 默认只针对 `expected_commit` 对应的 **tracked source**。`target/`、`node_modules/`、`.venv/`、`build/`、`dist/` 等 ignored/untracked derived state 不属于“替代 GitHub 源码搜索”的范围，默认不应进入结果。如果任务明确需要调查本地产物，继续使用普通 repository process/tool 路径。
+
+返回必须有界。至少返回：
+
+```text
+path
+line
+snippet
+```
+
+并对 `max_results`、snippet 长度和总 response 大小设置上限。snippet 只用于判断相关性，不能把上下文窗口无限放大后变相实现整文件读取。
+
+#### Web GPT 的目标往返策略
+
+`repo_search` 正式发布后的典型流程：
+
+```text
+1. GitHub：取得 repository URL + exact commit
+2. CWapi：repo_search 定位相关文件和行
+3. GitHub：精确读取 1~N 个命中文件
+4. Web GPT：分析并决定修改
+5. GitHub：提交修改并取得新的 exact commit
+6. CWapi：在新 commit 上执行 build / test / run
+```
+
+搜索结果不足时可以再发新的 `repo_search`。不要因为 CWapi 已有 workspace 就把完整源码经 Slack 搬回来，搜索优化的收益来自**减少定位阶段的远端往返**，不是把所有 repository I/O 都转移到 Slack。
+
+在 `repo_search` 真正实现、完成协议与 Gate、并进入正式发布包之前，**当前 v1.6.3 仍继续使用 GitHub Connector 完成源码搜索和文件读取**。这一节记录的是已经确定的下一步设计与真实可行性依据，不改变当前 v1.6.3 wire contract。
 
 ### 可执行文件与运行环境解析
 
@@ -74,7 +169,7 @@ v1.6.3 的 persistent workspace 会在同一 CWapi 进程内保留同 repository
 
 补充规则：
 
-- `process invocation could not be resolved` 首先视为可执行文件解析失败，不要直接归因于脚本或仓库内容；
+- `process invocation could not be resolved` 首先视为 executable resolution failure，不要直接归因于脚本或仓库内容；
 - portable 自带的运行时优先使用 portable 内绝对路径，例如 `<portable-root>/runtime/node/node.exe`；
 - repository 内脚本优先把仓库相对路径直接放进 `command`，例如 `tools/env-probe.cmd`。不要为了找到脚本先改 `cwd` 再只传 basename；
 - Windows path 在 MCP JSON 中统一使用 `/`。如果必须使用 `\`，必须正确做 JSON 转义，避免在 claim 前得到 `MCP_REQUEST_JSON_INVALID`；
@@ -120,8 +215,10 @@ full_access local mode
 - status-list 是 global 且 params 为空；
 - resource/tool 可 global 或 repository；
 - caller 不提供 `threadId`；CWapi 管理 request-scoped context；
-- `server=cwapi` 只支持 process_start/status/stop，不进入 stock relay；
+- `server=cwapi` 当前只支持 process_start/status/stop，不进入 stock relay；
 - 不要假定两个不同 request_id 的 stock MCP 调用共享浏览器页面、tab、locator 或其它 session state。
+
+`repo_search` 在真正实现前不属于当前 v1.6.3 工具清单；实现时必须同步更新协议、测试、acceptance 和正式发行文档，不能只改工作流说明。
 
 ### Playwright 多步操作
 
@@ -155,10 +252,13 @@ stock MCP 使用 request-scoped context。需要完成“打开页面 -> 填表 
 
 ## 调用方责任
 
+### 当前 v1.6.3
+
 - 为每个新动作/状态快照生成新 request_id；
 - Windows path 在协议中使用 `/`；
 - 默认采用小而可诊断的任务，不以减少 Slack 往返次数为主要优化目标；
-- 已进入本地 repository 工作链后，同 repo/commit 的短文本检查与搜索优先复用 CWapi persistent workspace，不为读取同一 tracked source 无理由反复绕回 GitHub；
+- 当前没有正式 `repo_search`，不要构造不存在的 repository search 请求；
+- 当前源码搜索和完整文件读取继续使用 GitHub Connector；`process_start` 搜索只作为调试/兼容性手段，不作为正式 search API；
 - 优先复用同 repository persistent workspace 中输入一致的衍生资源，不无理由重复 build/install/start；
 - 不为绕过当前 repository 的 managed workspace 而重复 clone/fetch 同一 repository；跨 repository 任务按上面的 workspace 模型处理；
 - 只在 configured channel 传递短期 Token；
@@ -166,3 +266,11 @@ stock MCP 使用 request-scoped context。需要完成“打开页面 -> 填表 
 - System fallback 前确认错误确实属于 sandbox permission denial，而不是普通程序失败；
 - 安装新依赖前确认用户已经选择 `FULL` 权限下由 Web GPT 安装，或选择自行手动安装；
 - 需要二进制 MCP 结果时让 tool 返回 bytes/image/resource content，不要求 CWapi 根据文本路径自行读取本机文件。
+
+### `repo_search` 实现并正式发布后
+
+- 同 repo/commit 的代码搜索定位优先走 CWapi `repo_search`；
+- 根据 path/line/snippet，再通过 GitHub Connector 精确读取完整源码文件；
+- 不把 CWapi 搜索扩展成通用文件读取或大内容传输；
+- 新 exact commit、远端写入和 GitHub-native 元数据继续由 GitHub 负责；
+- Web GPT 继续负责理解、推理与规划，CWapi 只执行确定性搜索和本地任务。
