@@ -50,8 +50,6 @@ v1.6.3 的 persistent workspace 会在同一 CWapi 进程内保留同 repository
 
 只有步骤确实要求共享同一进程内存、临时环境、不可重建的 session/page 状态或原子事务时，才优先合并执行。**可诊断性、正确性与简单性优先于减少往返次数。**
 
-代码搜索是一个特殊的低风险批处理场景：同一轮为了理解一个问题而需要搜索多个相关关键词时，Web GPT 可以把这些**只读搜索**合并进一个短脚本/命令，让一次 repository `process_start` 返回多组定位结果。不要把 build、test、写入、commit 等有副作用动作顺手混进搜索脚本。
-
 ### Web GPT 必须理解的 workspace 模型
 
 - **把 request 当作执行步骤，不要把 request 当作 workspace 生命周期。** 同一 repository 的后续 request 会重新进入同一个 process-lifetime workspace。
@@ -60,107 +58,40 @@ v1.6.3 的 persistent workspace 会在同一 CWapi 进程内保留同 repository
 - 源码迁移、打包整理等任务可以拆成“准备目标 -> 选择/复制 -> 检查 -> commit -> push”等多个短 request。中间步骤失败时优先从现有 workspace 状态继续，不要无理由从头重做整个链路。
 - 禁止的是为了绕过当前 repository 的 managed workspace 而重复 clone 同一 repository。跨 repository 迁移确实需要操作第二个 repository 时，可以在受控 workspace 内使用明确的临时 helper clone，或将目标 repository 作为独立 repository request 处理。
 
-### Repository source search：v1.6.3 当前正式工作流
+### 仓库源码搜索
 
-v1.6.3 **不新增专用 `repo_search` / `repo_read` 工具，也不需要为了这项优化再发布新版本**。仓库源码搜索直接复用现有 `process_start` 与 persistent workspace。
+需要在仓库中定位函数、类型、变量、错误文本、配置键或其它源码位置时，优先由 Web GPT 根据当前问题生成**只读搜索命令或短脚本**，通过 repository-scoped `process_start` 在该 repository 的 persistent workspace 中执行。
 
-核心原则：
-
-> **Web GPT 负责理解“要找什么”，自己生成确定性的只读搜索脚本；CWapi 不理解搜索意图，只负责把该脚本放到正确 repository / exact commit 的 persistent workspace 中执行并返回结果。**
-
-因此在已经取得 `repository_url + expected_commit` 后，代码理解阶段不再默认使用 GitHub Connector 做宽泛仓库搜索。优先流程是：
+搜索结果只用于定位，优先返回：
 
 ```text
-Web GPT
-  -> 根据当前任务确定搜索词、搜索范围和排除目录
-  -> Slack MCP v2 repository process_start
-  -> CWapi acquire repository lease
-  -> Prepare(repository_url, expected_commit)
-  -> existing persistent workspace
-  -> Codex safe backend 执行 Web GPT 生成的只读搜索脚本
-  -> Slack 返回搜索结果
-  -> Web GPT 根据 path / line / snippet 判断真正需要看的文件
-  -> GitHub Connector 精确读取命中的完整文件
+path
+line
+匹配文本
+少量上下文
 ```
 
-这里的“脚本”可以是一个命令，也可以是为了同一轮搜索而组合的短脚本。它没有 Agent 能力，不应包含“理解哪个文件更相关”之类的模型逻辑；相关性判断仍由 Web GPT 在收到结果后完成。
+拿到命中路径后，需要完整上下文时再通过 GitHub Connector 精确读取相关文件。不要通过搜索脚本大量打印完整源码。
 
-#### 已验证依据
+搜索脚本遵守以下规则：
 
-2026-08-27 已通过真实 Slack -> CWapi 链验证：
+- 只读，不修改 tracked source，也不混入 build、test、install、format、commit、cleanup 等其它动作；
+- 能限定 `internal/`、`src/`、`tests/`、文件类型或其它范围时优先限定范围；
+- 默认排除 `target/`、`node_modules/`、`.venv/`、`build/`、`dist/`、缓存等 derived state，除非任务明确需要调查这些内容；
+- 同一问题需要多个相关关键词时，可以在一次短脚本中批量搜索并分段输出，减少 Slack 往返；
+- 优先使用当前 CWapi 运行环境已经验证可用的搜索方式，例如 `rg`、PowerShell `Select-String`、`findstr` 或其它只读命令；
+- 已经进入对应 `expected_commit` 的 workspace 后，搜索脚本不要再次 clone/fetch 同一 repository，也不要为了搜索访问 GitHub。
 
-1. 第一个 repository request 在 workspace 写入临时 untracked marker，同时读取 tracked `README.md`；
-2. request terminal 后只释放 lease；
-3. 第二个新的 repository request 使用同一 repository / same `expected_commit`；
-4. 第二个 request 成功重新进入同一个 process-lifetime workspace，读到第一个 request 留下的 marker，并继续读取对应 exact commit 的 tracked source；
-5. 测试 marker 随后已清理。
-
-这证明同一 CWapi 进程内，repository workspace 可以直接承担后续搜索，不需要为了定位源码再次通过 GitHub Connector 搜整仓库，也不需要重新 clone 同一 repository。
-
-#### 搜索与完整读取的职责边界
-
-CWapi 当前只替代**搜索定位阶段**，不替代完整源码读取。
-
-CWapi 搜索负责：
-
-- 按 Web GPT 给出的函数名、类型名、变量名、错误文本、配置键、普通字符串或正则进行本地搜索；
-- 限定目录/文件类型；
-- 排除明确无关的生成目录、依赖目录和缓存目录；
-- 返回文件路径、行号、匹配行以及少量上下文；
-- 必要时在一次只读脚本中搜索多个相关关键词，减少 Slack 往返。
-
-GitHub Connector 继续负责：
-
-- 根据搜索命中的路径精确读取完整源码文件；
-- 远端源码写入；
-- commit / branch / history；
-- PR / Issue / Review / Actions / CI / Release；
-- 取得新的 exact commit；
-- 其它 GitHub-native 结构化信息。
-
-不要因为本地 workspace 可以读取文件，就把大量完整源码通过 `process_start` 输出搬回 Slack。当前 public process record 的 `stdout_tail` / `stderr_tail` 各自只保留最近 8192 bytes；这条链适合**搜索定位和小结果返回**，不适合通用文件传输。
-
-#### 搜索脚本规则
-
-Web GPT 生成搜索脚本时应遵守：
-
-1. **只读。** 搜索任务不得修改 tracked source，不得顺手 format、generate、install、build、test、commit 或清理目录。
-2. **搜索范围要明确。** 能限定 `internal/`、`src/`、`tests/` 等范围时不要无条件扫描整个 workspace。
-3. **默认排除衍生目录。** `target/`、`node_modules/`、`.venv/`、`build/`、`dist/`、缓存和其它明显 derived state 不应污染源码搜索结果，除非用户明确要调查这些本地产物。
-4. **结果有界。** 优先返回 `path:line`、匹配文本和很少的上下文；避免打印完整文件。
-5. **相关关键词可批量。** 同一个问题需要搜索多个相关词时，可以一次脚本完成并分段标记结果，减少 Web GPT -> Slack -> CWapi 的往返。
-6. **不要依赖不存在的工具。** 优先使用 CWapi 当前运行环境已经验证可用的命令/运行时；如果 `rg` 不存在，可以使用 PowerShell `Select-String`、`findstr`、本地 Git 能力或其它已验证的只读搜索方式。不要因为搜索工具缺失进入无意义的 PATH 猜测。
-7. **搜索本身不要求网络。** 当 requested exact commit 已经在当前 workspace 中准备好时，搜索脚本只读取本地 workspace；不要在搜索脚本中再次 `git fetch`、clone 或访问 GitHub。
-8. **继续受 repository lease 保护。** 同 repository 的搜索不能绕过 lease 直接去内部 workspace 路径；必须作为正常 repository request，让 CWapi 保证搜索期间 workspace 对应请求声明的 `expected_commit`。
-
-典型输出应类似：
-
-```text
-=== query: WorkspaceManager ===
-internal/workspace/manager.go:142: type WorkspaceManager struct {
-internal/workspace/manager_test.go:73: manager := NewWorkspaceManager(...)
-
-=== query: AcquireRepository ===
-internal/workspace/manager.go:188: func (m *WorkspaceManager) AcquireRepository(...) {
-internal/gateway/router.go:87: lease, err := workspace.AcquireRepository(...)
-```
-
-如果搜索结果已经足够说明问题，Web GPT 可以直接继续推理；如果需要完整上下文，再通过 GitHub Connector 精确读取上述少量命中文件。
-
-#### 推荐的代码理解往返
+推荐的代码理解流程：
 
 ```text
 1. GitHub：取得 repository URL + exact commit
-2. CWapi：Web GPT 发布只读搜索脚本，一次定位相关 path / line / snippet
-3. GitHub：精确读取真正需要的 1~N 个文件
+2. CWapi：执行 Web GPT 生成的只读搜索脚本，定位相关 path / line / snippet
+3. GitHub：精确读取真正需要的少量文件
 4. Web GPT：分析并决定修改
 5. GitHub：提交修改并取得新的 exact commit
 6. CWapi：在新 commit 上执行 build / test / run
 ```
-
-搜索不足时可以再发第二个搜索 request，但不要退回“GitHub 宽泛搜索 -> 猜文件 -> 再搜索”的旧路径，除非本地搜索因为环境/协议故障不可用。
-
-这项规则是 **v1.6.3 当前工作流的一部分**，不表示新增 wire method，也不要求修改 CWapi 二进制。
 
 ## 3. 可执行文件与运行环境解析
 
@@ -259,8 +190,6 @@ full_access local mode
 - `server=cwapi` 只支持 `process_start/status/stop`，不进入 stock relay；
 - 不要假定两个不同 stock MCP request 共享浏览器 page/tab/locator/session state。
 
-Repository source search 不是新增 MCP tool；它只是 Web GPT 使用现有 repository `process_start` 执行只读搜索脚本的工作流约定。
-
 ### Playwright 多步操作
 
 需要完成“导航 -> 填表 -> 点击 -> 断言 -> 截图”时，优先在一次 Playwright 调用内完成连续动作。若拆成多个 request，后续 request 必须自行重建页面状态。
@@ -292,7 +221,7 @@ repository prepare/release/startup sweep/shutdown cleanup/prune 的网络、认�
 - frame 第一行必须是 `+++`；
 - Windows path 在 JSON 中优先使用 `/`；
 - 代码理解需要仓库搜索时，优先由 Web GPT 生成只读搜索脚本，通过 repository-scoped `process_start` 在 persistent workspace 内执行；
-- 搜索输出应保持有界，以 path / line / 小 snippet 为主；完整源码文件按需通过 GitHub Connector 精确读取；
+- 搜索输出保持简短，以 path / line / 小 snippet 为主；完整源码文件按需通过 GitHub Connector 精确读取；
 - 搜索脚本不得为了定位源码再次 clone/fetch 同一 repository，也不得混入无关写入/build/test 操作；
 - 同一 repository 优先复用 persistent workspace 的有效衍生物，不无理由重复 install/build；
 - 不为绕过当前 repository 的 managed workspace 而重复 clone/fetch 同一 repository；跨 repository 任务按上面的 workspace 模型处理；
