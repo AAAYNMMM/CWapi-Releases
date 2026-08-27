@@ -45,6 +45,22 @@ v1.6.3 的 persistent workspace 会在同一 CWapi 进程内保留同 repository
 - 源码迁移、打包整理等任务可以拆成“准备目标 -> 选择/复制 -> 检查 -> commit -> push”等多个短 request。中间步骤失败时优先从现有 workspace 状态继续，不要无理由从头重做整个链路。
 - 禁止的是为了绕过当前 repository 的 managed workspace 而重复 clone 同一 repository。跨 repository 迁移确实需要操作第二个 repository 时，可以在受控 workspace 内使用明确的临时 helper clone，或将目标 repository 作为独立 repository request 处理。
 
+### Repository source inspection path
+
+在已经取得 `repository_url + expected_commit` 并进入 CWapi 本地开发链后，**同一 repository / same exact commit 的重复源码检查与文本搜索应优先复用 CWapi persistent workspace，而不是为了读同一份 tracked source 反复绕回 GitHub Connector。** GitHub 继续负责提供远端源码真相、取得新的 exact commit，以及 PR / Issue / CI / Review / Release 等 GitHub-native 信息。
+
+当前 v1.6.3 **还没有专用的 `repo_read` / `repo_search` virtual tool**。现阶段已经真实验证的可用办法，是发送 repository-scoped、只读的 `process_start`，在 CWapi 管理的 workspace 内执行确定性的读取/搜索命令，例如读取小文件、查看指定范围或按字符串搜索。2026-08-27 的真实链探测证明：第一个 request 在 workspace 留下的 untracked marker，在 request terminal 后由第二个新 request 继续读到，同时 tracked `README.md` 仍对应同一个 `expected_commit`，说明本地 workspace 可以承担跨 request 的源码检查路径。
+
+必须同时遵守当前能力边界：
+
+- `process_start` 仍经过 Codex safe backend，因此这是**功能可用的本地读取路径**，不是对单个小文件延迟的绝对保证；
+- public process record 的 `stdout_tail` / `stderr_tail` 各自只有最近 8192 bytes，不能把 `process_start` 当成通用的大文件传输接口；
+- 当前 stock MCP 只提供 Playwright，没有现成 filesystem read server；需要完整大文件、超出 process tail 的源码或结构化 GitHub 内容时，仍可直接使用 GitHub Connector；
+- 读取 tracked source 时只把 `expected_commit` 对应内容视为源码真相；ignored/untracked 内容属于本地 derived state，除非任务明确就是检查这些本地产物；
+- 不要为了“本地读取”额外 clone/fetch 同一 repository。repository request 自己负责 prepare；mirror 已有 commit 时不会重复 fetch，workspace 已存在时会继续复用同一 process-lifetime workspace。
+
+因此当前规则是**部分替代**：短文本检查、搜索和本地执行链上下文优先走 CWapi workspace；远端元数据、远端写入以及超过当前本地返回边界的完整源码读取继续走 GitHub。后续若新增 Go Core 直接实现的只读 `repo_read/repo_search` virtual tool，再把完整源码读取默认切到 CWapi，而不需要给 CWapi 增加 Agent。
+
 ### 可执行文件与运行环境解析
 
 `process_start` 使用 CWapi 启动时冻结的执行环境。不要假定用户交互式终端中的 PATH 与 CWapi 看到的 PATH 相同，也不要把某台机器上的固定绝对路径当成通用规则。
@@ -142,6 +158,7 @@ stock MCP 使用 request-scoped context。需要完成“打开页面 -> 填表 
 - 为每个新动作/状态快照生成新 request_id；
 - Windows path 在协议中使用 `/`；
 - 默认采用小而可诊断的任务，不以减少 Slack 往返次数为主要优化目标；
+- 已进入本地 repository 工作链后，同 repo/commit 的短文本检查与搜索优先复用 CWapi persistent workspace，不为读取同一 tracked source 无理由反复绕回 GitHub；
 - 优先复用同 repository persistent workspace 中输入一致的衍生资源，不无理由重复 build/install/start；
 - 不为绕过当前 repository 的 managed workspace 而重复 clone/fetch 同一 repository；跨 repository 任务按上面的 workspace 模型处理；
 - 只在 configured channel 传递短期 Token；
