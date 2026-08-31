@@ -1,211 +1,388 @@
-# CWapi v1.6.1 故障排查
+# CWapi 1.6.3 Troubleshooting
 
-这份文档只回答：**出了什么问题，下一步查哪里。** 正常使用见 [`USER_GUIDE.md`](USER_GUIDE.md)，Slack 从零配置见 [`SLACK_SETUP.md`](SLACK_SETUP.md)。
+[English](TROUBLESHOOTING.md) | [简体中文](TROUBLESHOOTING.zh-CN.md)
 
-## 1. CWapi 启动 / 发行包
+Use this guide by symptom. For Slack setup details, see [Slack Setup](SLACK_SETUP.md). For protocol rules, see [ChatGPT Workflow](CHATGPT_WORKFLOW.md).
 
-### CWapi 启动不了
-确认 Windows 11 x64、ZIP 已完整解压、`CWapi.exe` 与 `runtime/` 在同一便携目录、安装目录可写。不要在 ZIP 内直接运行，也不要混用不同版本的 `runtime/`。
+## CWapi does not start
 
-首次运行后会生成 `CWapi-data/`。移动时关闭 CWapi 并移动整个便携目录。
+**Symptom**
 
-## 2. Slack 问题
+`CWapi.exe` closes immediately, reports a startup/config error, or the GUI never becomes usable.
 
-完整 scopes / Socket Mode / token / Channel ID 步骤见 [`SLACK_SETUP.md`](SLACK_SETUP.md)。
+**Likely cause**
 
-### 配置验证失败
+The portable package is incomplete, the directory is not writable, the config is invalid, or a required bundled runtime/data-root check failed.
 
-```text
-SLACK_APP_TOKEN_INVALID
--> App Token 必须是 xapp-...
+**What to check**
 
-SLACK_BOT_TOKEN_INVALID
--> Bot Token 必须是 xoxb-...
+- Confirm the whole ZIP was extracted.
+- Confirm `CWapi.exe` is not being run from inside the ZIP.
+- Check `CWapi-data/config/cwapi.json` and the latest runtime error.
+- Remember that the product is 1.6.3 but the current `cwapi.config.v2` schema version is still `1.6.1`.
 
-SLACK_READINESS_BOT_IDENTITY_FAILED
--> Bot Token 无效 / 被撤销 / Workspace 不匹配
+**How to fix**
 
-SLACK_READINESS_CHANNEL_FAILED
--> Channel ID 错、缺 read scope、Bot 没加入频道
+Re-extract the complete `CWapi-v1.6.3.zip` into a clean user-writable directory. Do not manually change the config schema version to `1.6.3`; the current code expects `1.6.1` for that schema field.
 
-SLACK_BOT_NOT_CHANNEL_MEMBER
--> 把 CWapi Bot 加入控制频道
+## Slack shows degraded or keeps reconnecting
 
-SLACK_READINESS_SOCKET_FAILED
--> 检查 Socket Mode、App Token、connections:write
-```
+**Symptom**
 
-### 能收请求但不能回文本
-检查 `chat:write`。
+Slack briefly connects and then becomes degraded, or the Socket Mode connection repeatedly reconnects.
 
-### 文本正常但截图 / 文件失败
-检查 `files:write`。如果是 Playwright，确认 `browser_take_screenshot` 没有指定 `filename`，让工具返回真正的 MCP image content。
+**Likely cause**
 
-### CWapi 没收到 Web GPT 消息
-确认 Slack healthy、Web GPT 和 CWapi 使用同一 Workspace/Channel、Bot 在频道内，并且消息是完整 MCP v2 frame：
+Invalid/revoked token, missing `connections:write`, wrong Workspace, network interruption, or channel-readiness failure.
+
+**What to check**
+
+- App Token begins with `xapp-...`.
+- Socket Mode is enabled.
+- App-Level Token includes `connections:write`.
+- Bot Token belongs to the same Workspace.
+- Channel ID is correct.
+- Bot is in the configured channel.
+
+**How to fix**
+
+Correct the Slack App settings, reinstall the app after scope changes, regenerate/re-enter revoked tokens, and save the candidate credentials again in CWapi.
+
+## CWapi receives no ChatGPT request
+
+**Symptom**
+
+ChatGPT posts to Slack, but CWapi never claims the request.
+
+**Likely cause**
+
+Wrong channel, bot not subscribed to the correct event, malformed frame, or the first line is not `+++`.
+
+**What to check**
+
+- ChatGPT is using the same Slack control channel configured in CWapi.
+- Public channel uses `message.channels`; private channel uses `message.groups`.
+- The frame begins exactly with:
 
 ```text
 +++
 [CWapi/MCP/2][MCP_REQUEST][REQUEST_ID]
-{"schema":"cwapi.mcp.request.v2","protocol_version":"cwapi-mcp/2",...}
-+++
 ```
 
-v1.6.1 不接受 MCP v1。
+- JSON schema/protocol are v2.
 
-## 3. Repository / exact commit
+**How to fix**
 
-v1.6.1 没有 project registry、`projects/list` 或 `project_id`。
+Send the request in the configured channel using a complete MCP v2 frame. Reinstall the Slack App after adding/changing event subscriptions.
 
-repository-scoped request 必须同时提供：
+## CWapi can receive requests but cannot reply
+
+**Symptom**
+
+CWapi claims or processes the request but no response appears in Slack.
+
+**Likely cause**
+
+Missing `chat:write`, revoked Bot Token, Slack API failure, or channel membership changed.
+
+**What to check**
+
+- `chat:write` is present.
+- Bot Token is valid.
+- Bot is still a member of the configured channel.
+- Slack runtime error details.
+
+**How to fix**
+
+Add/fix the scope, reinstall the app, restore channel membership, and retry with a new request ID when the previous request did not produce a usable terminal response.
+
+## File upload fails
+
+**Symptom**
+
+Text responses work but screenshots or other files do not appear.
+
+**Likely cause**
+
+Missing `files:write`, the underlying tool returned only a text path, or the binary result could not be externalized.
+
+**What to check**
+
+- `files:write` is installed on the Bot Token.
+- The tool result actually contains binary/resource content.
+- For Playwright screenshot, no `filename` was passed.
+
+**How to fix**
+
+Add `files:write` and reinstall the app. For screenshots call `browser_take_screenshot` without `filename`. Do not expect a printed local path to be uploaded automatically.
+
+## Bot is not in the channel
+
+**Symptom**
+
+Readiness or posting reports that the bot is not a member, or channel operations fail despite correct scopes.
+
+**Likely cause**
+
+The bot was never invited, was removed, or the configured Channel ID points to another channel.
+
+**What to check**
+
+Compare the configured `C...` Channel ID with the actual control channel and inspect channel membership.
+
+**How to fix**
+
+Invite the CWapi bot to the exact configured channel, then re-run the real communication test.
+
+## `missing_scope`
+
+**Symptom**
+
+Slack returns `missing_scope`.
+
+**Likely cause**
+
+The Slack App configuration is missing one of the permissions needed for the attempted operation, or the app was not reinstalled after the scope was added.
+
+**What to check**
+
+Public-channel baseline:
 
 ```text
-repository_url
-expected_commit
+connections:write
+channels:read
+channels:history
+chat:write
+files:write
+message.channels
 ```
 
-### repository URL 被拒绝
-只使用标准 GitHub HTTPS repository URL，例如：
+Private channel additionally:
 
 ```text
-https://github.com/owner/repo
+groups:read
+groups:history
+message.groups
 ```
 
-不要携带 userinfo、port、query、fragment 或额外 path。
+**How to fix**
 
-### commit 被拒绝
-`expected_commit` 必须是完整 40 位 Git commit，并且属于该 repository。
+Add the missing scope/event and reinstall the app to the Workspace.
 
-### private repository 准备失败
-检查本机 GitHub CLI / GitHub 凭据是否能访问目标 private repository，以及 commit 是否真实存在。不要把 GitHub token 放进 MCP command/argv。
+## Private repository cannot be accessed
 
-## 4. MCP route / process tool
+**Symptom**
 
-当前允许的方法只有：
+Mirror fetch/clone/update fails for a private GitHub repository.
 
-```text
-mcpServerStatus/list
-mcpServer/resource/read
-mcpServer/tool/call
+**Likely cause**
+
+The current Windows user's GitHub CLI login is missing, expired, or lacks repository permission; the credential helper cannot be resolved; or the repository URL is invalid.
+
+**What to check**
+
+Run:
+
+```powershell
+gh auth status
 ```
 
-`server=cwapi` 只接受：
+Confirm the user can access the repository and that the URL is a normal GitHub HTTPS repository URL.
 
-```text
-process_start
-process_status
-process_stop
-```
+**How to fix**
 
-### `MCP_REQUEST_JSON_INVALID`
-先检查 JSON 本身，尤其是 Windows `\` 路径与嵌套 shell 字符串。正式远程路径优先使用 `/`，减少 JSON escape 错误。
+Run `gh auth login` again or grant the authenticated account access. CWapi can use the existing `gh auth git-credential` helper; it does not repair the GitHub account's permissions for you.
 
-### `MCP_SYSTEM_TOKEN_INVALID`
-System Token 只能位于 request 顶层，格式必须符合 v2 协议。不要放进 params/arguments。
+## Exact commit is rejected or unavailable
 
-### request id conflict
-同一个 request id 只能对应同一个 fingerprint。新动作或新状态快照使用新的 request id。
+**Symptom**
 
-## 5. 环境 / executable
+Repository preparation fails because `expected_commit` is invalid, missing, or cannot be found in the mirror.
 
-### `process invocation could not be resolved` / command not found
-先把它当成 executable 解析失败，不要立即归因于项目代码。
+**Likely cause**
 
-按顺序检查：
+Short SHA, typo, branch name supplied instead of a commit, commit not fetched/available from the repository, or repository/commit mismatch.
 
-```text
-1. CWapi portable/runtime/tools/cache
-2. 本机已有环境，而且必须是 CWapi 当前进程实际可见的环境
-3. 两边都没有：停止猜路径
-4. 用户切换 FULL 后由 Web GPT 安装，或用户手动安装
-5. 安装后重新探测 executable/version
-```
+**What to check**
 
-不要固定 `C:/WINDOWS/py.exe`、`python.exe`、`node.exe` 或某个用户目录作为通用规则。
+- `expected_commit` is exactly 40 hexadecimal characters.
+- The commit belongs to the requested repository.
+- GitHub shows the same commit.
 
-### 本机终端能运行，CWapi 却找不到
-CWapi 使用启动时冻结的 PATH。交互式 PowerShell 后来新增的 PATH 不一定对当前 CWapi 生效。找到实际 executable 后直接使用绝对路径，或重启 CWapi 后再验证。
+**How to fix**
 
-### repository 内脚本 basename 找不到
-优先直接使用 repository-relative command：
+Resolve the exact commit from GitHub again and send a new request with the correct repository URL + full commit pair.
 
-```text
-tools/build.cmd
-scripts/test.bat
-```
+## `process invocation could not be resolved`
 
-不要为了找到脚本先改 cwd，再只传 basename。
+**Symptom**
 
-### Windows path
-MCP JSON 中优先使用：
+`process_start` cannot resolve the requested executable/script.
 
-```text
-C:/Program Files/Tool/tool.exe
-```
+**Likely cause**
 
-而不是未经正确 JSON 转义的反斜杠路径。
+The command is not in CWapi's frozen runtime PATH, a guessed absolute path is wrong, or a repository script was referenced only by basename/cwd assumptions.
 
-## 6. SAFE / FULL 权限
+**What to check**
 
-### SAFE 能不能调用本机已有程序
-能否启动与能否写系统目录是两件事。SAFE 可以调用允许解析的本机程序，但 repository process 的写权限仍受控。
+- CWapi-managed runtime/tool paths first.
+- What the running CWapi process can actually resolve via `where`/`Get-Command` or another read-only probe.
+- Repository-relative script path.
 
-如果安装器、pip、npm 或其它工具尝试写受控范围外位置，可能得到权限拒绝。
+**How to fix**
 
-### 什么时候切 FULL
-确认任务确实需要安装软件或扩大本机写权限，并且 CWapi 自管环境与本机已有环境都不能满足需求时，由用户明确切换 FULL。
+Use the real resolved executable path or the explicit repository-relative script path. If the tool is genuinely absent, install it only with user-authorized `FULL` or manually, then probe it again.
 
-FULL 仍是 Codex-first。只有真实结构化 `PERMISSION_DENIED` 才进入短期 System Token fallback。FULL 不跨 CWapi 重启保留。
+## SAFE permission failure
 
-## 7. process 生命周期
+**Symptom**
 
-### `state = running` 是失败吗
-不是。长进程正常会返回 `running + process_id`。后续用新的 global request id 查询同一个 `process_id`，不要重新 start。
+A command is blocked because it needs access outside the SAFE execution boundary.
 
-### `process_stop` 后 exit code 不好看
-主动终止长期服务不一定自然返回 0。重点确认公开 state 是否为 `stopped`，以及服务/端口是否真的关闭。
+**Likely cause**
 
-### localhost `ERR_CONNECTION_REFUSED`
-启动阶段出现时检查 process state、stdout/stderr、端口与 bind address；如果是在 stop 后验证，反而可能说明服务已正确停止。
+The invocation needs broader filesystem/system permission than SAFE allows, or it violates a permanent policy rule.
 
-## 8. Playwright / Web E2E
+**What to check**
 
-### navigate 成功，下一条 fill 却找不到元素
-stock MCP context 是 request-scoped ephemeral。不同 request 不保证共享浏览器页面状态。
+Distinguish a structured `PERMISSION_DENIED` from an ordinary program/test failure. Check whether the requested top-level command itself is permanently blocked.
 
-连续 E2E 优先在一次 Playwright 调用中完成；拆开时，每个后续 request 自己重建所需页面状态。
+**How to fix**
 
-### 截图只得到 `./xxx.png`
-这通常表示工具把截图保存在本地，并只返回了路径文本。CWapi 不会因为普通文本里出现本地 path/URI 就擅自读取文件。
+If the task legitimately needs broader permission, the user can switch to `FULL` and retry through the documented fallback flow. Permanent-policy blocks cannot be bypassed by FULL.
 
-需要传给 ChatGPT 时不传 `filename`，让 Playwright 返回 MCP `type=image` content，CWapi 再上传为 Slack File。
+## FULL is enabled but System execution still does not happen
 
-## 9. Duplicate / 长任务
+**Symptom**
 
-### duplicate request 为什么不执行第二次
-相同 request id + 相同 fingerprint 会返回已保存 response，不重复执行副作用。
+A command fails in FULL but CWapi does not issue/accept a System Token.
 
-### 为什么 3 分钟就停止等待
-这是 Web GPT 工作流的等待预算，不是 cancel。
+**Likely cause**
 
-同一个外部任务连续等待/轮询累计最多 3 分钟；到上限仍无 terminal result 时，报告“任务仍在运行”、request/process id 和最后状态。下一轮继续查询原任务，不重复提交。
+The failure is not a recognized sandbox permission denial, the invocation changed, the token expired/was used, the token is in the wrong JSON location, or permanent policy blocks the command.
 
-环境缺失不是等待事件。确认依赖不存在后立即进入安装决策。
+**What to check**
 
-## 10. 收集最小排障信息
+- Original response is `blocked + PERMISSION_DENIED`.
+- Token is top-level and still within its 60-second lifetime.
+- Retry uses a new `request_id` but the same repository, commit, executable, argv, and cwd.
+- Token has not already been consumed.
 
-优先收集：
+**How to fix**
 
-```text
-CWapi version
-permission mode
-repository URL + expected commit
-request_id + method + server/tool
-terminal status + error.code + error.message
-process_id（如果有）
-必要的 stdout_tail / stderr_tail
-```
+Repeat the permission flow correctly. If the program itself failed, fix the program instead of trying to convert a normal failure into a permission bypass.
 
-不要直接上传整个 `CWapi-data`、Credential Manager、Token 或所有日志。
+## Process remains `running`
 
-专项文档：[`PROTOCOL.md`](PROTOCOL.md)、[`SECURITY.md`](SECURITY.md)、[`CHATGPT_WORKFLOW.md`](CHATGPT_WORKFLOW.md)、[`SLACK_TRANSPORT.md`](SLACK_TRANSPORT.md)。
+**Symptom**
+
+`process_start` returns a `process_id` and the task does not finish quickly.
+
+**Likely cause**
+
+The process is genuinely long-running, waiting on its own work, or is a server/watcher designed to stay alive.
+
+**What to check**
+
+Call `process_status` using a new global request ID and inspect stdout/stderr tails and state.
+
+**How to fix**
+
+Keep querying the same `process_id` at reasonable intervals. Do not resend `process_start`. Stop it only when appropriate with `process_stop`.
+
+## Three-minute waiting limit reached
+
+**Symptom**
+
+Web GPT reports that the task is still running instead of continuing to wait.
+
+**Likely cause**
+
+The workflow deliberately caps one continuous wait/poll window at three minutes.
+
+**What to check**
+
+Confirm whether a stable `process_id` or request state already exists.
+
+**How to fix**
+
+Keep that state and check again later with a new status request. Do not chain many shorter polls just to bypass the three-minute total.
+
+## Playwright page/session state disappeared
+
+**Symptom**
+
+A later browser action cannot find the expected page, locator, or session state from an earlier request.
+
+**Likely cause**
+
+Unrelated stock MCP requests should not be assumed to share browser page/tab/locator/session state.
+
+**What to check**
+
+Whether the browser steps were split across separate request-scoped contexts.
+
+**How to fix**
+
+Keep tightly coupled navigate/fill/click/assert/screenshot work together when the tool requires a live session, or explicitly rebuild the required page state in the new request.
+
+## Screenshot only returns a path
+
+**Symptom**
+
+The response contains something like `./screenshot.png`, but ChatGPT receives no image file.
+
+**Likely cause**
+
+The tool was asked to write to a filename and returned text instead of image content.
+
+**What to check**
+
+Whether `browser_take_screenshot` was called with `filename`.
+
+**How to fix**
+
+Call it again without `filename` so the MCP result includes image bytes for CWapi to upload.
+
+## Duplicate request behavior is unexpected
+
+**Symptom**
+
+Repeating a Slack message returns an old stored response, or the same request ID causes a conflict.
+
+**Likely cause**
+
+CWapi fingerprints requests. The same request ID + same fingerprint is idempotent and can replay the stored response; the same request ID + different fingerprint is rejected.
+
+**What to check**
+
+Compare the full canonical request content and request ID.
+
+**How to fix**
+
+Use a fresh request ID for every new action/state query. Reuse an ID only when intentionally retrying the exact same request.
+
+## Workspace preparation fails
+
+**Symptom**
+
+CWapi cannot prepare/resync the repository workspace or reports a workspace root/integrity problem.
+
+**Likely cause**
+
+Git/authentication failure, tracked/untracked path conflict, filesystem/reparse issue, stale incompatible derived state, or managed root integrity failure.
+
+**What to check**
+
+- Git/authentication error detail.
+- Whether ignored/untracked state conflicts with the new tracked tree.
+- `CWapi-data/workspaces` root integrity.
+- Whether a symlink/reparse point replaced a managed root.
+
+**How to fix**
+
+Fix authentication or filesystem integrity first. If project-derived state conflicts with the new commit, clean only the necessary project build/cache directories using the project's own commands. Do not manually delete random CWapi internals while the program is running.
+
+## Need more diagnostic data
+
+Use the GUI's latest runtime/structured execution error information and the bounded runtime logs. Ordinary logs redact known credential/token shapes. Do not paste Slack tokens or System Tokens into issues or public logs while debugging.

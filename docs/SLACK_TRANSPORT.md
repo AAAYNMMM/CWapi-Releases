@@ -1,4 +1,4 @@
-# CWapi v1.6.1 Slack Transport
+# CWapi v1.6.3 Slack Transport
 
 Slack 是 transport 与信任边界，不是 scheduler、权限数据库或 shell parser。
 

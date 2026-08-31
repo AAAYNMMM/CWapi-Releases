@@ -1,6 +1,6 @@
-# CWapi v1.6.1 MCP Protocol
+# CWapi v1.6.3 MCP Protocol
 
-v1.6.1 只接受 MCP v2，不兼容 v1。
+v1.6.3 只接受 MCP v2，不兼容 v1。
 
 ## Slack frame
 

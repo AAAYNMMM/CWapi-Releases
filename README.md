@@ -1,47 +1,18 @@
-<div align="center">
+# CWapi 1.6.3
 
-# CWapi
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-**Turn ChatGPT Web into a local coding agent — without a real MCP connection or Codex Agent quota.**
+[![Release](https://img.shields.io/github/v/release/AAAYNMMM/chatgpt-work-api-Releases?filter=v1.6.3&style=flat-square&label=Release)](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/tag/v1.6.3)
+![Windows](https://img.shields.io/badge/Windows-11%20x64-0078d4?style=flat-square)
+![Transport](https://img.shields.io/badge/Transport-GitHub%20%2B%20Slack-4A154B?style=flat-square)
 
-**让网页 ChatGPT 连接本地 Windows 开发环境，无需真正的 MCP 链路，也不消耗 Codex Agent 配额。**
+**CWapi 1.6.x is the legacy GitHub + Slack release line. Current release: `1.6.3`.**
 
-[![ChatGPT](https://img.shields.io/badge/ChatGPT-Plus%20%7C%20Pro-10a37f?style=flat-square)](https://chatgpt.com/)
-![MCP](https://img.shields.io/badge/MCP-Not%20Required-6f42c1?style=flat-square)
-![Codex Agent](https://img.shields.io/badge/Codex%20Agent%20Quota-Not%20Used-success?style=flat-square)
-![Platform](https://img.shields.io/badge/Platform-Windows%2011-0078d4?style=flat-square)
-![Install](https://img.shields.io/badge/Install-Portable-orange?style=flat-square)
-[![Release](https://img.shields.io/github/v/release/AAAYNMMM/CWapi-Releases?style=flat-square&label=Release)](https://github.com/AAAYNMMM/CWapi-Releases/releases)
+CWapi 1.6.3 lets ChatGPT Web use GitHub for source truth and Slack as a control/data channel to run real development work on a local Windows machine. Web GPT does the reasoning. CWapi does not run an AI model.
 
-[功能](#功能) · [使用前准备](#使用前准备) · [快速开始](#快速开始) · [用户指南](docs/USER_GUIDE.md) · [Web GPT 工作流](docs/WEB_GPT_ENTRY.md)
+> Looking for CWapi 2.x? Use the [`main` branch](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/main). The 2.x MCP/Tunnel/Coding/Agent architecture is a separate product line. Do not copy 1.6.x Slack configuration into 2.x.
 
-</div>
-
----
-
-CWapi 让普通 ChatGPT Web 会话通过 Slack 调用本机 Windows 开发环境。Web GPT 负责理解需求和修改 GitHub，CWapi 负责在对应 GitHub commit 上运行本机工具，再把真实结果和文件返回给 Web GPT。
-
-## 关于 MCP
-
-**CWapi 使用 MCP 风格的消息格式来组织结构化 request / response，但 ChatGPT Web 与本机之间并没有建立真正的 MCP 连接。**
-
-**CWapi uses MCP-style message formats for structured requests and responses, but it does not establish a real MCP connection between ChatGPT Web and the local machine.**   
-
-<img width="373" height="688" alt="Snipaste_2026-08-25_02-45-09" src="https://github.com/user-attachments/assets/38654765-d920-43d4-ac45-f026bdd4b17b" />
-
-
-## 功能
-
-- 让 ChatGPT Web 调用本机编译、测试、脚本和开发工具；
-- 在指定 GitHub repository 的准确 commit 上执行任务；
-- 支持 localhost 网页与 Playwright 浏览器测试；
-- 支持截图、文件和较大结果经 Slack 返回；
-- 支持长进程启动、查询和停止；
-- 默认 `SAFE` 权限，必要时可由用户临时切换 `FULL`；
-- 自动优先使用 CWapi 自带或管理的运行环境，再使用本机已有环境；
-- 不使用 Codex Agent Turn 替 Web GPT 思考。
-
-## 工作流
+## How it works
 
 ```text
 ChatGPT Web
@@ -49,66 +20,97 @@ ChatGPT Web
    ▼
 Slack control channel
    ▼
-CWapi
-   │ exact repository + commit
+CWapi 1.6.3
    ▼
-Local Windows tools
-   │
+Local Windows development tools
    ▼
-Slack response / File
-   ▼
-ChatGPT Web
+Slack response / files
 ```
 
-Web GPT 的完整执行规则见 [`docs/CHATGPT_WORKFLOW.md`](docs/CHATGPT_WORKFLOW.md)。
+ChatGPT reads and changes the remote repository through GitHub, obtains an exact 40-character commit SHA, then sends a structured CWapi request through the configured Slack channel. CWapi prepares that exact commit in its local managed workspace and runs local build, test, browser, script, or process tools. Results return through Slack.
 
-## 使用前准备
+CWapi 1.6.3 uses an **MCP v2-shaped message frame over Slack**. This is not a direct ChatGPT-to-local MCP connection and it does not require an OpenAI Secure MCP Tunnel.
 
-需要：
+## Why use 1.6.3
 
-- Windows 11 x64；
-- 一个 Slack Workspace；
-- ChatGPT 中连接 GitHub 和 Slack；
-- **用户自行安装 GitHub CLI，并在本机完成登录。**
+- Use ChatGPT Web as the reasoning agent while keeping execution on your Windows PC.
+- Execute against an exact GitHub commit instead of an ambiguous local checkout.
+- Reuse a persistent repository workspace for the life of the CWapi process, preserving useful untracked/ignored build state and caches.
+- Run long tasks with `process_start`, `process_status`, and `process_stop`.
+- Return screenshots and other tool-produced files through Slack.
+- Keep normal work in `SAFE`; use `FULL` only when a task genuinely needs broader local permission.
+- Keep Slack App/Bot tokens out of the JSON config and store them in Windows Credential Manager.
 
-GitHub CLI：<https://cli.github.com/>
+## Choose the right release line
 
-安装后执行：
+| Release line | Transport | Main use |
+| --- | --- | --- |
+| **1.6.x** | GitHub + Slack Socket Mode | Legacy Web GPT local-development workflow |
+| **2.x** | MCP + OpenAI Secure MCP Tunnel | Separate current architecture; see `main` |
 
-```powershell
-gh auth login
-gh auth status
-```
+Read the [Version Guide](docs/VERSION_GUIDE.md) before switching lines.
 
-确认 `gh auth status` 正常后即可使用 CWapi。
+## 5-minute quick start
 
-## 快速开始
+1. Download [`CWapi-v1.6.3.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/tag/v1.6.3) and fully extract it.
+2. Run `CWapi.exe` from the extracted directory.
+3. Install [GitHub CLI](https://cli.github.com/) and run `gh auth login`, then `gh auth status`.
+4. Create a Slack App with Socket Mode, the required scopes, and a dedicated control channel. Follow [Slack Setup](docs/SLACK_SETUP.md).
+5. In CWapi, save the App Token, Bot Token, and Channel ID.
+6. Connect GitHub and Slack in ChatGPT.
+7. Give Web GPT your repository and ask it to follow [Web GPT Entry](docs/WEB_GPT_ENTRY.md) and [ChatGPT Workflow](docs/CHATGPT_WORKFLOW.md).
+8. Confirm the first CWapi response appears in the same Slack request thread.
 
-1. 从 [GitHub Releases](https://github.com/AAAYNMMM/CWapi-Releases/releases) 下载 `CWapi-v1.6.3.zip`。
-2. 完整解压后运行 `CWapi.exe`。
-3. 按 [`docs/SLACK_SETUP.md`](docs/SLACK_SETUP.md) 完成 Slack 配置。
-4. 确认 GitHub CLI 已登录，并在 ChatGPT 中连接 GitHub 和 Slack。
-5. 第一次告诉 Web GPT：
+For the full first-run path, use [Getting Started](docs/GETTING_STARTED.md).
 
-> 连接 GitHub，读取 `AAAYNMMM/CWapi-Releases` 的 `docs/WEB_GPT_ENTRY.md`，然后使用 CWapi v1.6.3 工作流处理我的项目。
+## Core concepts
 
-之后可以直接给开发任务，例如：
+### GitHub is source truth
 
-> 使用 CWapi 工作流开发 `https://github.com/username/project`，修改后在对应 exact commit 上完成本机测试。
+Repository-scoped requests carry both `repository_url` and `expected_commit`. The commit must be a full 40-hex Git commit available to the managed mirror. ChatGPT should update GitHub first when tracked source must persist, then run local validation against the resulting exact commit.
 
-v1.6.3 不需要在 CWapi 中添加项目。
+### Persistent workspace
 
-## 权限
+Within one CWapi process, the same repository reuses one managed workspace. Each new repository request can resync tracked source to a new exact commit while leaving compatible ignored/untracked derived state in place. The workspace is removed during normal shutdown or startup cleanup of stale workspaces; shared Git mirrors are retained.
 
-日常使用保持 `SAFE` 即可。
+### SAFE and FULL
 
-如果任务需要安装新的本机软件或修改 SAFE 范围外的环境，Web GPT 会提示用户临时切换 `FULL`，或者用户也可以选择手动安装。
+`SAFE` is the default and is reset on every CWapi start. `FULL` does not remove permanent safety rules. A System fallback is only available after a recognized permission denial and uses a short-lived, one-time System Token bound to the original invocation.
 
-CWapi 重启后会重新回到 `SAFE`。
+### Long-running processes
 
-## 文档
+`process_start` starts repository-scoped work. If it is still running, keep the returned `process_id` and query it with new global `process_status` request IDs. Use `process_stop` to stop it. Web GPT should not continuously wait longer than three minutes in one stretch; if the task is still running, report the current state and continue later with status checks.
 
-- [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md)：第一次安装和使用。
-- [`docs/SLACK_SETUP.md`](docs/SLACK_SETUP.md)：Slack 配置。
-- [`docs/WEB_GPT_ENTRY.md`](docs/WEB_GPT_ENTRY.md)：Web GPT 开工入口。
-- [`docs/CHATGPT_WORKFLOW.md`](docs/CHATGPT_WORKFLOW.md)：完整工作流逻辑。
+## Typical uses
+
+- Build and test a GitHub project on the user's real Windows environment.
+- Run localhost services and browser automation.
+- Search source in the prepared repository workspace, then read or edit exact files through GitHub.
+- Produce screenshots or generated files and return them through Slack.
+- Keep a long build/server process alive while Web GPT checks status separately.
+
+## Security and privacy
+
+Slack App/Bot tokens are stored in the current Windows user's Credential Manager. Only the Slack Channel ID is stored in `CWapi-data/config/cwapi.json`. Treat the configured Slack channel as a trusted control boundary. CWapi redacts known secrets from ordinary runtime logs, but raw transport/current-session response storage may retain a short-lived System Token so duplicate delivery can work.
+
+Private Git access can use the current Windows user's existing `gh auth git-credential` helper. CWapi does not modify global Git configuration.
+
+See [Security](docs/SECURITY.md) for the detailed boundary.
+
+## Documentation
+
+- [Getting Started](docs/GETTING_STARTED.md)
+- [User Guide](docs/USER_GUIDE.md)
+- [Slack Setup](docs/SLACK_SETUP.md)
+- [Web GPT Entry](docs/WEB_GPT_ENTRY.md)
+- [ChatGPT Workflow](docs/CHATGPT_WORKFLOW.md)
+- [FAQ](docs/FAQ.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Version Guide](docs/VERSION_GUIDE.md)
+- [Protocol](docs/PROTOCOL.md)
+- [Security](docs/SECURITY.md)
+- [Architecture](docs/ARCHITECTURE.md)
+
+## Development vs release repository
+
+This repository is the release-facing snapshot and documentation for CWapi. Development happens in [`AAAYNMMM/CWapi`](https://github.com/AAAYNMMM/CWapi). The 1.6.x branch intentionally excludes development history, tests, build automation, and other release-irrelevant material.

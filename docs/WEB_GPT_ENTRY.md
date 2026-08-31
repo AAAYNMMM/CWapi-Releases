@@ -1,24 +1,39 @@
-# CWapi v1.6.3 Web GPT Entry
+# CWapi 1.6.3 Web GPT Entry
 
-这是 Web GPT 使用 CWapi 的最小入口。开始本机调用前，读取并遵守 [`CHATGPT_WORKFLOW.md`](CHATGPT_WORKFLOW.md)。
+[English](WEB_GPT_ENTRY.md) | [简体中文](WEB_GPT_ENTRY.zh-CN.md)
 
-## 当前链路
+Use this page as the short operating entry for Web GPT. Read [ChatGPT Workflow](CHATGPT_WORKFLOW.md) for the full rules.
+
+## Role split
 
 ```text
 Web GPT
-→ GitHub：取得 repository URL / exact commit，并处理完整文件读取、远端写入、PR、Issue、CI 等 GitHub-native 信息
-→ Slack：发送 CWapi repository 请求
-→ CWapi：准备/复用对应 exact commit 的 persistent workspace，执行本地搜索、build、test、run 或 stock MCP
-→ Slack：返回结果
+  -> reasons about the task
+  -> uses GitHub for repository truth and source changes
+  -> uses Slack to send CWapi control frames and read responses
+
+CWapi 1.6.3
+  -> prepares the exact local repository commit
+  -> runs local tools/processes
+  -> returns real results/files through Slack
 ```
 
-CWapi 不运行模型，也不要求 ChatGPT Web 与本机建立直接 MCP 连接。
+CWapi does not run an AI model. Its MCP v2 frame is transported through Slack; it is not a direct ChatGPT-to-local MCP connection.
 
-## 开工时必须知道
+## Before a repository action
 
-1. repository 调用直接使用 GitHub repository URL 与完整 40 位 commit。
+Web GPT must know:
 
-2. 只使用 CWapi MCP v2：
+1. the GitHub HTTPS `repository_url`;
+2. the full 40-character `expected_commit`;
+3. what local action should run;
+4. a fresh `request_id`.
+
+GitHub remains the source of truth for tracked source, commits, branches, PRs, issues, reviews, Actions/CI, and releases.
+
+## MCP v2 frame
+
+A complete frame starts and ends with `+++`:
 
 ```text
 +++
@@ -27,20 +42,64 @@ CWapi 不运行模型，也不要求 ChatGPT Web 与本机建立直接 MCP 连�
 +++
 ```
 
-3. 每个新动作使用新的 `request_id`。已经得到 `process_id` 后，后续查询原进程，不重复启动同一任务。
+The first line must be `+++`. Use `/` in Windows paths inside JSON when practical. If a backslash is required, escape it according to JSON rules.
 
-4. Windows path 在 MCP JSON 中优先使用 `/`。
+## Repository workflow
 
-5. 同一 repository 在当前 CWapi 进程内使用 persistent workspace。request terminal 只释放 repository lease，不删除 workspace；衍生物可以在同一 CWapi 进程内复用。
+```text
+GitHub: resolve repository + exact commit
+        ↓
+Slack: send repository-scoped CWapi request
+        ↓
+CWapi: prepare/reuse persistent workspace at exact commit
+        ↓
+CWapi: search / build / test / browser / process work
+        ↓
+Slack: return response/file
+        ↓
+Web GPT: inspect result and choose next action
+```
 
-6. 需要在仓库中搜索代码时，由 Web GPT 根据当前问题生成只读搜索命令或短脚本，通过 repository-scoped `process_start` 在 persistent workspace 中执行。搜索结果以文件路径、行号、匹配文本和少量上下文为主；需要完整源码时，再通过 GitHub Connector 精确读取命中的文件。
+If tracked source changes, commit those changes through GitHub first, obtain the new exact commit, then validate locally against that commit.
 
-7. 搜索脚本保持只读，尽量限定目录和文件类型，排除无关的依赖、构建和缓存目录；同一问题的多个相关关键词可以合并到一次搜索中。已经进入对应 exact commit 的 workspace 后，不要为了搜索再次 clone/fetch 同一 repository。
+## Source search
 
-8. GitHub 仍是远端源码真相和 exact commit 来源；完整文件读取、源码写入、commit、branch/history、PR、Issue、Review、Actions/CI、Release 等仍通过 GitHub 处理。
+When repository code must be located, prefer a small read-only search command in the prepared workspace. Return only the useful path/line/match/context. Do not clone or fetch the same repository again just to search it.
 
-9. 不要自行假设本机环境或固定工具路径。环境发现、SAFE/FULL、安装依赖、浏览器测试、截图和等待规则统一按照 [`CHATGPT_WORKFLOW.md`](CHATGPT_WORKFLOW.md) 执行。
+After locating a file, read or edit the full file through GitHub when GitHub-native source work is needed.
 
-## 完整工作流
+## Process handling
 
-[`CHATGPT_WORKFLOW.md`](CHATGPT_WORKFLOW.md)
+Use:
+
+```text
+cwapi/process_start
+cwapi/process_status
+cwapi/process_stop
+```
+
+`process_start` is repository-scoped. If it returns `running`, keep the `process_id`. Each later `process_status` or `process_stop` uses a new global request ID. Do not resend the original start request.
+
+Do not continuously wait/poll for more than three minutes. If the process is still running, report that fact and its current state rather than silently extending the wait forever.
+
+## Persistent workspace rule
+
+Treat a request as an execution step, not as the workspace lifetime. In one CWapi process, later requests for the same repository re-enter the same managed workspace.
+
+Tracked source may be resynced to `expected_commit`; ignored/untracked derived state is the main cross-request reusable state.
+
+## SAFE / FULL
+
+Stay in `SAFE` for normal work. `FULL` is only for explicit user-authorized tasks that need broader local permission. Permanent safety rules still apply.
+
+A System Token is only valid for a recognized permission-denied fallback. Never invent, reuse, or move it into nested params. The fallback request uses a new `request_id` while keeping the original repository/commit/invocation unchanged.
+
+## Screenshots and files
+
+For Playwright screenshot delivery, call `browser_take_screenshot` without `filename` so the MCP result can return actual image content for CWapi to upload to Slack.
+
+A printed local path is not a file transfer. CWapi only externalizes content actually returned by the underlying MCP result.
+
+## Start here
+
+For a new user, follow [Getting Started](GETTING_STARTED.md). For complete execution behavior, follow [ChatGPT Workflow](CHATGPT_WORKFLOW.md).

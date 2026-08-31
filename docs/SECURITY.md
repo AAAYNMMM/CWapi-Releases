@@ -1,4 +1,4 @@
-# CWapi v1.6.1 安全边界
+# CWapi v1.6.3 安全边界
 
 CWapi 面向个人单机使用，不实现 RBAC 或多租户。配置的 Slack channel 是远程信任边界；System Token 是该频道内的 60 秒 bearer，不绑定 Slack UserID/BotID/request_id。
 

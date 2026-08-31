@@ -1,4 +1,4 @@
-# CWapi v1.6.1 Codex app-server / MCPHost
+# CWapi v1.6.3 Codex app-server / MCPHost
 
 CWapi 使用固定 stock Codex app-server，不创建模型 turn。
 

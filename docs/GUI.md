@@ -1,4 +1,4 @@
-# CWapi v1.6.1 GUI
+# CWapi v1.6.3 GUI
 
 GUI 是本地状态观察与少量 owner mutation 面板，不承载 protocol truth。
 
