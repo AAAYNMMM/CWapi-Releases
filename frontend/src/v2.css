@@ -1,0 +1,112 @@
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; height: 100%; margin: 0; }
+body { background: #080a14; color: #edf0ff; font-family: Inter, "Segoe UI", sans-serif; }
+button, input { font: inherit; }
+button { -webkit-tap-highlight-color: transparent; }
+
+.shell {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0 18px 16px;
+  background: radial-gradient(circle at 20% -10%, rgba(84, 107, 255, .2), transparent 38%), #080a14;
+}
+.titlebar { height: 58px; display: flex; align-items: center; justify-content: space-between; --wails-draggable: drag; }
+.brand-row { display: flex; align-items: center; gap: 10px; }
+.brand-row > div:last-child { display: flex; align-items: baseline; gap: 7px; }
+.brand-row strong { font-size: 14px; letter-spacing: .01em; }
+.brand-row span { color: #7f89ad; font-size: 11px; }
+.logo { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; background: linear-gradient(145deg, #6f7dff, #9d72ff); box-shadow: 0 8px 24px rgba(98, 103, 255, .28); font-size: 12px; font-weight: 800; }
+.window-button { --wails-draggable: no-drag; border: 0; padding: 8px; background: transparent; color: #7f89ad; cursor: pointer; font-size: 25px; line-height: 1; }
+.window-button:hover { color: #fff; }
+
+.eyebrow { margin: 0 0 4px; color: #667099; font-size: 10px; letter-spacing: .18em; }
+.pill { display: inline-flex; align-items: center; padding: 5px 9px; border-radius: 999px; background: #171b2e; color: #929ab8; font-size: 10px; font-weight: 700; text-transform: uppercase; white-space: nowrap; }
+.pill.small { padding: 4px 8px; }
+.ok { color: #7de0b3 !important; }
+.busy { color: #f1c97a !important; }
+.bad { color: #ff8e9b !important; }
+.muted { color: #8e96b3 !important; }
+.pill.ok { background: rgba(69, 181, 132, .12); }
+.pill.busy { background: rgba(211, 164, 70, .12); }
+.pill.bad { background: rgba(220, 78, 95, .12); }
+
+.page-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+.page-tab { min-width: 0; display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid #1b2035; border-radius: 12px; background: rgba(15, 18, 32, .72); color: #7f89ad; cursor: pointer; text-align: left; }
+.page-tab:hover { border-color: #35416a; color: #cbd3f5; }
+.page-tab.active { border-color: #5363bd; background: linear-gradient(135deg, rgba(65, 76, 149, .36), rgba(22, 25, 48, .9)); color: #edf0ff; box-shadow: inset 0 0 0 1px rgba(120, 133, 255, .08); }
+.service-mark { width: 23px; height: 23px; flex: 0 0 23px; display: grid; place-items: center; border-radius: 7px; background: #202744; color: #aab6ff; font-size: 10px; font-weight: 800; }
+.service-mark.agent { background: #253b39; color: #86e0bc; }
+.page-tab-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.page-tab-copy strong { font-size: 11px; letter-spacing: .08em; }
+.page-tab-copy small { overflow: hidden; color: #727c9e; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.page-tab.active .page-tab-copy small { color: #a0a9d0; }
+.tab-dot { width: 7px; height: 7px; flex: 0 0 7px; margin-left: auto; border-radius: 50%; background: currentColor; box-shadow: 0 0 10px currentColor; }
+
+.card { margin-bottom: 10px; padding: 14px; border: 1px solid #1b2035; border-radius: 14px; background: rgba(15, 18, 32, .88); box-shadow: 0 10px 28px rgba(0, 0, 0, .16); }
+.card-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 11px; color: #b3bad5; font-size: 11px; font-weight: 800; letter-spacing: .12em; }
+.endpoint-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-top: 1px solid #171c2e; }
+.endpoint-row:first-of-type { border-top: 0; }
+.endpoint-row > div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.endpoint-row span, .stat-row span { color: #747d9d; font-size: 11px; }
+.endpoint-row code { display: block; max-width: 285px; overflow: hidden; color: #bbc3df; font: 10px "Cascadia Code", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.endpoint-row button, .actions button, .text-button, .workspace-item button { border: 1px solid #28304d; border-radius: 8px; padding: 6px 9px; background: #151a2c; color: #c7cee6; cursor: pointer; font-size: 10px; }
+.endpoint-row button:hover, .actions button:hover, .text-button:hover, .workspace-item button:hover { border-color: #5966a8; color: #fff; }
+.text-button { margin-top: 7px; background: transparent; }
+
+.tunnel-panel { margin-top: 9px; padding-top: 10px; border-top: 1px solid #171c2e; }
+.tunnel-panel-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.tunnel-panel-title strong { color: #d2d8f0; font-size: 11px; }
+.tunnel-input { width: 100%; margin-top: 6px; outline: none; border: 1px solid #28304d; border-radius: 8px; padding: 8px 9px; background: #0b0e1b; color: #dbe2ff; font: 10px "Cascadia Code", Consolas, monospace; }
+.tunnel-input:focus { border-color: #5966a8; }
+.tunnel-input::placeholder { color: #59617d; }
+.actions { display: flex; gap: 7px; margin-top: 7px; }
+.actions button { flex: 1; }
+.segmented { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-bottom: 10px; padding: 4px; border-radius: 10px; background: #0b0e1b; }
+.segmented button { border: 0; border-radius: 7px; padding: 7px; background: transparent; color: #737d9f; cursor: pointer; font-size: 11px; font-weight: 800; }
+.segmented button.selected { background: #202840; color: #dce2ff; }
+.segmented button.selected.danger { background: rgba(189, 69, 91, .18); color: #ffadb9; }
+.stat-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; }
+.stat-row strong { font-size: 11px; font-weight: 700; }
+.repo { overflow: hidden; margin-top: 5px; padding: 6px 8px; border-radius: 7px; background: #0b0e1a; color: #8f99bc; font: 10px "Cascadia Code", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.triple { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 3px 0; }
+.metric { display: flex; align-items: baseline; justify-content: center; gap: 4px; padding: 3px 5px; border-radius: 9px; background: #0b0e1a; text-align: center; }
+.metric strong { font-size: 14px; line-height: 1; }
+.metric span { color: #68718f; font-size: 8px; line-height: 1.1; }
+.current-error { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 2px 4px; padding: 6px 8px; border: 1px solid rgba(220, 78, 95, .22); border-radius: 8px; background: rgba(121, 39, 56, .11); color: #d88896; font-size: 9px; }
+.current-error code { overflow: hidden; color: #ff9eaa; font: 9px "Cascadia Code", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.switch { position: relative; width: 34px; height: 19px; }
+.switch input { width: 0; height: 0; opacity: 0; }
+.switch span { position: absolute; inset: 0; border-radius: 999px; background: #272d43; cursor: pointer; transition: .2s; }
+.switch span:after { content: ""; position: absolute; top: 3px; left: 3px; width: 13px; height: 13px; border-radius: 50%; background: #777f9d; transition: .2s; }
+.switch input:checked + span { background: #4757a7; }
+.switch input:checked + span:after { transform: translateX(15px); background: #e7eaff; }
+footer { padding: 6px 4px 2px; color: #59617d; font-size: 9px; line-height: 1.45; text-align: center; }
+
+.overlay { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(2, 4, 10, .76); backdrop-filter: blur(5px); }
+.manager, .confirm-dialog { width: 100%; max-height: 84%; overflow: auto; border: 1px solid #252b46; border-radius: 16px; background: #0d1120; box-shadow: 0 18px 55px rgba(0, 0, 0, .45); }
+.manager { padding: 15px; }
+.manager-head { display: flex; align-items: flex-start; justify-content: space-between; }
+.manager-head h2, .confirm-dialog h2 { margin: 0; color: #edf0ff; font-size: 17px; }
+.manager-head button { border: 0; background: transparent; color: #8992b1; cursor: pointer; font-size: 23px; }
+.manager-note { margin: 11px 0; color: #737d9c; font-size: 10px; line-height: 1.5; }
+.workspace-list { display: flex; flex-direction: column; gap: 7px; }
+.workspace-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px; border: 1px solid #171d31; border-radius: 10px; background: #090d19; }
+.workspace-item code { min-width: 0; overflow: hidden; color: #aeb7d7; font: 10px "Cascadia Code", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-item button { flex: 0 0 auto; border-color: #4b2932; background: rgba(121, 46, 60, .12); color: #ef9ca7; }
+.empty { padding: 16px; color: #68718f; font-size: 10px; text-align: center; }
+.warning { margin-top: 9px; padding: 8px; border-radius: 8px; background: rgba(190, 139, 55, .1); color: #e2bd75; font-size: 10px; }
+.confirm-overlay { z-index: 30; }
+.confirm-dialog { max-width: 340px; padding: 20px; }
+.confirm-icon { width: 30px; height: 30px; display: grid; place-items: center; margin-bottom: 13px; border: 1px solid rgba(236, 130, 107, .3); border-radius: 9px; background: rgba(196, 83, 80, .15); color: #ffad9e; font-size: 15px; font-weight: 800; }
+.confirm-dialog h2 { margin-top: 2px; }
+.confirm-description { margin: 10px 0 18px; color: #929bb9; font-size: 11px; line-height: 1.6; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.confirm-actions button { min-width: 74px; border-radius: 8px; padding: 8px 11px; cursor: pointer; font-size: 10px; }
+.cancel-button { border: 1px solid #28304d; background: #151a2c; color: #bdc5de; }
+.danger-button { border: 1px solid #823c48; background: #642d3b; color: #ffe4e6; }
+.cancel-button:hover, .danger-button:hover { filter: brightness(1.12); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button:focus-visible, input:focus-visible { outline: 2px solid #7180df; outline-offset: 2px; }
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-thumb { border-radius: 999px; background: #252b43; }

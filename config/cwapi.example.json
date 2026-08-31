@@ -1,0 +1,26 @@
+{
+  "schema": "cwapi.config.v3",
+  "version": "2.0.0",
+  "mcp": {
+    "port": 32124,
+    "coding_token": "cwapi_coding_AAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "agent_token": "cwapi_agent_BBBBBBBBBBBBBBBBBBBBBBBBBB"
+  },
+  "codex": {
+    "executable": "",
+    "access_profile": "safe"
+  },
+  "agent": {
+    "enabled": true,
+    "port": 32123,
+    "api_key": "cwapi_CCCCCCCCCCCCCCCCCCCCCCCCCC"
+  },
+  "tunnel": {
+    "enabled": false,
+    "tunnel_id": ""
+  },
+  "agent_tunnel": {
+    "enabled": false,
+    "tunnel_id": ""
+  }
+}

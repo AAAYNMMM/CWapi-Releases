@@ -1,0 +1,36 @@
+{
+  "schema": "cwapi.portable-runtime-lock.v3",
+  "platform": "windows-x86_64",
+  "components": {
+    "git": {
+      "distribution": "Git for Windows MinGit",
+      "version": "2.55.0.windows.4",
+      "source": "git-for-windows/git",
+      "archive_name": "MinGit-2.55.0.4-64-bit.zip",
+      "url": "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.4/MinGit-2.55.0.4-64-bit.zip",
+      "sha256": "4e03f94c2ffbf70be337e005cee02661c732dbfc81031a078bda9299b9a7d644",
+      "executable_relative": "cmd/git.exe"
+    },
+    "codex": {
+      "version": "0.150.1",
+      "source": "openai/codex",
+      "source_ref": "rust-v0.150.1",
+      "source_commit": "90854393966b21e9ebfd21b122334eb09a20c93d",
+      "archive_name": "codex-package-x86_64-pc-windows-msvc.tar.gz",
+      "url": "https://github.com/openai/codex/releases/download/rust-v0.150.1/codex-package-x86_64-pc-windows-msvc.tar.gz",
+      "sha256": "ee39581a58e6022117bb81ef6805f8e03d0dc185275604937f7810843753cc5d",
+      "executable_sha256": "cbd657ddfe151d1a6ebad660beffdbd3265dc5aff4b3a6095124d3e2f0156f2f"
+    },
+    "tunnel": {
+      "distribution": "OpenAI tunnel-client",
+      "version": "0.0.10",
+      "source": "openai/tunnel-client",
+      "source_ref": "v0.0.10",
+      "archive_name": "tunnel-client-v0.0.10-windows-amd64.zip",
+      "url": "https://github.com/openai/tunnel-client/releases/download/v0.0.10/tunnel-client-v0.0.10-windows-amd64.zip",
+      "sha256": "5e64a056f1d96786da0a6f8db1da5f5f4a03fd19a90d951a25cf2ca8d9093d00",
+      "executable_sha256": "d893d8127eee35070d265c1be29bfe008f8d9fcb476e7febf56c8fdc6c0615c8",
+      "executable_relative": "tunnel-client.exe"
+    }
+  }
+}
