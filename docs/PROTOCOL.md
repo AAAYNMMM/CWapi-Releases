@@ -178,13 +178,30 @@ POST /v1/chat/completions
 
 默认 model 为 `cwapi-web-gpt`。HTTP request body 上限 1 MiB；单个 broker request 与每次 exchange 总 JSON payload 上限为 1 MiB。最大 active queue 16；默认整体 timeout 180 秒。没有 bridge 返回 503 `AGENT_BRIDGE_UNAVAILABLE`，queue 满返回 429 `AGENT_BUSY`，timeout 返回 504 `AGENT_REQUEST_TIMEOUT`。
 
+2.0.3 的 Provider 不再把外部 JSON 直接交给 broker。正式转换链是：
+
+```text
+local Agent software
+-> OpenAI Compatible Adapter
+-> CWapi Canonical Format
+-> Context Optimizer
+-> MCP bridge
+-> Web GPT
+```
+
+返回沿相反方向转换。Web GPT 是本地 Agent 软件实际使用且唯一负责推理的模型；本地软件只执行工具和本地操作，CWapi 不运行第二个 AI。
+
+Canonical Format 只表示模型通信所需的 conversation/message/tool definition/tool call/tool result/completion/error/stream chunk。`system/developer/user/assistant/tool` role、`tool_call_id`、task/correlation metadata 会稳定保留；未识别的客户端私有字段不会进入 MCP context。Context Optimizer 是确定性代码，只规范化 metadata、JSON tool result 和可证明相同的重复 system/developer/tool 状态，不压缩或删除用户任务语义。
+
+`GET /v1/models` 的 model item 额外描述当前 adapter 名称与能力：`streaming/tools/parallel_tools=true`，`images/files=false`。这是能力声明，不会恢复文件或图片实现。错误边界使用稳定代码区分 request JSON/role/content、capability、canonical conversion、tool mapping、Web GPT response 和 stream conversion；普通客户端不会收到 Go stack。
+
 Provider 接受标准顶层 `metadata` object（最多 32 项；key 最长 64 字符；string value 最长 512 字符，也允许 number/bool/null）并原样交付 Web GPT。建议长任务由本地 client 提供稳定 `task_id` 与 `correlation_id`；CWapi 仍以每个 HTTP request 的随机 `request_id` 做精确事务关联，不从消息文本推断 task 或 command lifecycle。
 
-`stream=false` 返回 chat completion JSON；`stream=true` 在等待 Web GPT 时发送 SSE comment keepalive，完成后返回协议合法的 chunks，最后为 `data: [DONE]`。它不是 token-level realtime streaming。
+`stream=false` 返回 chat completion JSON；`stream=true` 在等待 Web GPT 时发送 SSE comment keepalive，完成后由 canonical `StreamChunk` 经 adapter 返回协议合法的 buffered chunks，最后为 `data: [DONE]`。它不是 token-level realtime streaming，也不会伪造 token delta；adapter 同时保留双向 stream-chunk 转换接口供未来真实流式链路使用。
 
 ## File and media transport boundary
 
-CWapi 2.0.2 不提供文件或图片传输。
+CWapi 2.0.3 不提供文件或图片传输。
 
 ### Coding
 

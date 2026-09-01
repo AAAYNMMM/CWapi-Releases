@@ -28,6 +28,6 @@
 
 ## Change control
 
-2.0.2 uses strict `cwapi.config.v3 / 2.0.2`; mismatched config is rejected rather than migrated implicitly.
+2.0.3 uses strict `cwapi.config.v3 / 2.0.3`; mismatched config is rejected rather than migrated implicitly.
 
 Routine development may create commits and test-only `refs/heads/cwapi-e2e/*` branches when a guarded E2E explicitly requires them. Merge to `main`, tag, Release, force-push and remote test-ref deletion require explicit user authorization.

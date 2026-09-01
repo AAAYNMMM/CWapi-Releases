@@ -14,12 +14,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AAAYNMMM/CWapi/internal/v2/agentprotocol"
 	v2config "github.com/AAAYNMMM/CWapi/internal/v2/config"
 )
 
 const (
 	maxRequestBody              = DefaultMaxBatchBytes
 	defaultSSEHeartbeatInterval = 15 * time.Second
+	DefaultModel                = agentprotocol.DefaultModel
 )
 
 type ProviderSnapshot struct {
@@ -32,6 +34,8 @@ type Provider struct {
 	mu        sync.RWMutex
 	cfg       v2config.AgentConfig
 	broker    *Broker
+	adapter   agentprotocol.Adapter
+	optimizer agentprotocol.ContextOptimizer
 	server    *http.Server
 	listen    net.Listener
 	heartbeat time.Duration
@@ -39,13 +43,23 @@ type Provider struct {
 }
 
 func NewProvider(cfg v2config.AgentConfig, broker *Broker) (*Provider, error) {
+	return NewProviderWithAdapter(cfg, broker, agentprotocol.NewOpenAICompatibleAdapter())
+}
+
+func NewProviderWithAdapter(cfg v2config.AgentConfig, broker *Broker, adapter agentprotocol.Adapter) (*Provider, error) {
 	if broker == nil {
 		return nil, errors.New("AGENT_BROKER_REQUIRED")
+	}
+	if adapter == nil {
+		return nil, errors.New("AGENT_PROTOCOL_ADAPTER_REQUIRED")
 	}
 	if err := v2config.ValidateAgent(cfg, 0); err != nil {
 		return nil, err
 	}
-	return &Provider{cfg: cfg, broker: broker, heartbeat: defaultSSEHeartbeatInterval, state: ProviderSnapshot{State: "stopped"}}, nil
+	return &Provider{
+		cfg: cfg, broker: broker, adapter: adapter, optimizer: agentprotocol.NewContextOptimizer(),
+		heartbeat: defaultSSEHeartbeatInterval, state: ProviderSnapshot{State: "stopped"},
+	}, nil
 }
 
 func (p *Provider) Start(ctx context.Context) error {
@@ -160,7 +174,9 @@ func (p *Provider) authorized(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (p *Provider) handleModels(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": []any{map[string]any{"id": DefaultModel, "object": "model", "owned_by": "cwapi"}}})
+	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": []any{map[string]any{
+		"id": DefaultModel, "object": "model", "owned_by": "cwapi", "protocol": p.adapter.Name(), "capabilities": p.adapter.Capabilities(),
+	}}})
 }
 
 func (p *Provider) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
@@ -173,16 +189,17 @@ func (p *Provider) handleChatCompletions(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusRequestEntityTooLarge, "request_too_large")
 		return
 	}
-	if err := rejectTransferInputs(body); err != nil {
-		writeError(w, http.StatusBadRequest, errorCode(err))
-		return
-	}
-	payload, model, stream, err := normalizeChatRequest(body)
+	conversation, err := p.adapter.DecodeRequest(body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, errorCode(err))
 		return
 	}
-	handle, err := p.broker.Enqueue(payload, model, stream)
+	conversation, _, err = p.optimizer.Optimize(conversation)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, errorCode(err))
+		return
+	}
+	handle, err := p.broker.Enqueue(conversation)
 	if err != nil {
 		switch errorCode(err) {
 		case "AGENT_BRIDGE_UNAVAILABLE":
@@ -194,7 +211,7 @@ func (p *Provider) handleChatCompletions(w http.ResponseWriter, r *http.Request)
 		}
 		return
 	}
-	if stream {
+	if conversation.Stream {
 		p.handleStreamingCompletion(w, r, handle)
 		return
 	}
@@ -214,15 +231,12 @@ func (p *Provider) handleChatCompletions(w http.ResponseWriter, r *http.Request)
 		writeError(w, status, code)
 		return
 	}
-	writeJSON(w, http.StatusOK, buildCompletion(result))
-}
-
-func buildCompletion(result RequestResult) map[string]any {
-	message := map[string]any{"role": "assistant", "content": result.Completion.Content}
-	if result.Completion.ToolCalls != nil {
-		message["tool_calls"] = result.Completion.ToolCalls
+	completion, err := p.adapter.EncodeCompletion(result.Completion, completionMetadata(result))
+	if err != nil {
+		writeError(w, http.StatusBadGateway, errorCode(err))
+		return
 	}
-	return map[string]any{"id": "chatcmpl-" + strings.TrimPrefix(result.ID, "request_"), "object": "chat.completion", "created": result.Created.Unix(), "model": result.Model, "choices": []any{map[string]any{"index": 0, "message": message, "finish_reason": result.Completion.FinishReason}}}
+	writeJSON(w, http.StatusOK, completion)
 }
 
 type requestWaitResult struct {
@@ -267,7 +281,11 @@ func (p *Provider) handleStreamingCompletion(w http.ResponseWriter, r *http.Requ
 				}
 				return
 			}
-			writeSSECompletion(w, buildCompletion(waitedResult.result))
+			if err := p.writeSSECompletion(w, waitedResult.result); err != nil {
+				code := errorCode(err)
+				payload, _ := json.Marshal(map[string]any{"error": map[string]any{"message": code, "type": "cwapi_error", "code": code}})
+				_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\ndata: [DONE]\n\n", payload)
+			}
 			if flusher != nil {
 				flusher.Flush()
 			}
@@ -276,29 +294,28 @@ func (p *Provider) handleStreamingCompletion(w http.ResponseWriter, r *http.Requ
 	}
 }
 
-func writeSSECompletion(w io.Writer, completion map[string]any) {
-	choices, _ := completion["choices"].([]any)
-	delta := map[string]any{"role": "assistant"}
-	var finishReason any = "stop"
-	if len(choices) > 0 {
-		if choice, ok := choices[0].(map[string]any); ok {
-			if message, ok := choice["message"].(map[string]any); ok {
-				for key, value := range message {
-					delta[key] = value
-				}
-			}
-			finishReason = choice["finish_reason"]
+func (p *Provider) writeSSECompletion(w io.Writer, result RequestResult) error {
+	metadata := completionMetadata(result)
+	for _, chunk := range agentprotocol.BufferedCompletionChunks(result.Completion) {
+		if chunk.Done {
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+			continue
 		}
+		encoded, err := p.adapter.EncodeStreamChunk(chunk, metadata)
+		if err != nil {
+			return err
+		}
+		payload, err := json.Marshal(encoded)
+		if err != nil {
+			return errors.New("AGENT_STREAM_CONVERSION_FAILED")
+		}
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
 	}
-	writeSSEChunk(w, completion, delta, nil)
-	writeSSEChunk(w, completion, map[string]any{}, finishReason)
-	_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	return nil
 }
 
-func writeSSEChunk(w io.Writer, completion map[string]any, delta map[string]any, finishReason any) {
-	chunk := map[string]any{"id": completion["id"], "object": "chat.completion.chunk", "created": completion["created"], "model": completion["model"], "choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": finishReason}}}
-	payload, _ := json.Marshal(chunk)
-	_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+func completionMetadata(result RequestResult) agentprotocol.CompletionMetadata {
+	return agentprotocol.CompletionMetadata{ID: result.ID, Model: result.Model, Created: result.Created}
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

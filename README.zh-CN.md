@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-[![Release](https://img.shields.io/github/v/release/AAAYNMMM/chatgpt-work-api-Releases?filter=v2.0.2&style=flat-square&label=Release)](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/tag/v2.0.2)
+[![Release](https://img.shields.io/github/v/release/AAAYNMMM/chatgpt-work-api-Releases?filter=v2.0.3&style=flat-square&label=Release)](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/tag/v2.0.3)
 ![Windows](https://img.shields.io/badge/Windows-11%20x64-0078d4?style=flat-square)
 ![MCP](https://img.shields.io/badge/MCP-Coding%20%2B%20Agent-6f42c1?style=flat-square)
 ![OpenAI compatible](https://img.shields.io/badge/API-OpenAI--compatible-10a37f?style=flat-square)
@@ -14,7 +14,7 @@ CWapi 2.0 提供两条彼此隔离的链路：
 - **Coding**：ChatGPT Web 通过 MCP 操作本地 Git workspace，读取、修改、编译、测试和执行开发命令。
 - **Agent**：CWapi 在 localhost 提供 OpenAI-compatible API，本地软件把模型请求交给 Web GPT，再取得回答或 `tool_calls`。
 
-当前正式版本：**`2.0.2`**。
+当前正式版本：**`2.0.3`**。
 
 ## CWapi 是什么？
 
@@ -122,7 +122,7 @@ Cline、Roo Code 等允许自定义 OpenAI-compatible provider 的客户端**可
 
 ## 5 分钟快速开始
 
-1. 下载 [`CWapi-v2.0.2.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.2/CWapi-v2.0.2.zip)。
+1. 下载 [`CWapi-v2.0.3.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.3/CWapi-v2.0.3.zip)。
 2. 完整解压到当前用户可写目录，运行 `CWapi.exe`。
 3. 要使用 **Coding**，先创建 OpenAI Secure MCP Tunnel，取得 Tunnel ID 与 Runtime API key，再填入 CWapi 的 Coding Tunnel 面板。
 4. 在 ChatGPT 使用支持你所需 MCP 能力的计划/Workspace，按当前 Developer Mode / custom app 流程连接同一个 Tunnel。ChatGPT 不能直接访问 CWapi 的 `127.0.0.1` MCP 地址。
@@ -149,7 +149,7 @@ Cline、Roo Code 等允许自定义 OpenAI-compatible provider 的客户端**可
 
 ## 文件与图片
 
-CWapi 2.0.2 的 Coding 与 Agent MCP 都不传输文件或图片。源码、Markdown、JSON、日志等可检查 repository 文本通过有界 `coding_exec` 命令读取。
+CWapi 2.0.3 的 Coding 与 Agent MCP 都不传输文件或图片。源码、Markdown、JSON、日志等可检查 repository 文本通过有界 `coding_exec` 命令读取。
 
 Agent 只接受文本与 tool JSON。顶层 `attachments` 返回 `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`；`image_url` 等非文本 message content 返回 `AGENT_MEDIA_INPUT_UNSUPPORTED`。
 
@@ -195,15 +195,15 @@ CWapi 不建立持久化完整对话 transcript，也不保存完整 command-out
 
 ## 发行路线
 
-- [`main`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/main)：CWapi 2.x，当前正式版本 `2.0.2`。
+- [`main`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/main)：CWapi 2.x，当前正式版本 `2.0.3`。
 - [`1.6.x`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/1.6.x)：CWapi 1.6.x 旧版路线，当前正式版本 `1.6.3`。
 
 ## 开发仓库与发行仓库
 
 当前仓库只放面向发行的干净源码快照、portable Release 和用户文档。完整开发历史、测试、验证/打包自动化和发行工程位于 [`AAAYNMMM/CWapi`](https://github.com/AAAYNMMM/CWapi)。
 
-CWapi 2.0.2 对应开发源码 commit：
+CWapi 2.0.3 对应开发源码 commit：
 
 ```text
-05068c482a617c6beb2acd5c6d2ff15cfedc7598
+8941aa5d41768993c01e7798678a485f56331691
 ```

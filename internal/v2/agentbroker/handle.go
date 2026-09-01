@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/AAAYNMMM/CWapi/internal/v2/agentprotocol"
 )
 
 type RequestResult struct {
@@ -11,7 +13,7 @@ type RequestResult struct {
 	Model      string
 	Stream     bool
 	Created    time.Time
-	Completion Completion
+	Completion agentprotocol.Completion
 }
 
 type RequestHandle struct {

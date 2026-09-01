@@ -1,4 +1,21 @@
-﻿# Changelog
+# Changelog
+
+## 2.0.3 — 2026-09-01
+
+2.0.3 将 Agent 外部协议转换从 broker/runtime 核心中抽离，并建立轻量的正式协议边界：
+
+- 新增 canonical conversation/message/tool definition/tool call/tool result/completion/error/stream chunk 类型，稳定保留 role、tool call ID 与 task/correlation metadata；
+- 新增 OpenAI-compatible Adapter 与 canonical MCP bridge codec，broker 不再直接解析客户端协议；
+- 新增确定性 Context Optimizer，只规范化 metadata、JSON tool result 和可证明重复的 system/developer/tool 状态，不调用第二个 AI、不删除重复 user task；
+- `/v1/models` 明确报告 adapter capabilities：streaming/tools/parallel tools 支持，images/files 不支持；
+- SSE 继续使用 keepalive + buffered completion chunks，不伪造 token-level streaming，同时保留未来真实流式扩展边界；
+- 产品、配置、GUI 与发行源码版本统一为 `2.0.3`。
+
+发行包对应开发仓库源码提交：
+
+```text
+8941aa5d41768993c01e7798678a485f56331691
+```
 
 ## 2.0.2 — 2026-09-01
 

@@ -64,7 +64,7 @@ func (a *App) startup(ctx context.Context) {
 	a.startupErr = err
 	a.mu.Unlock()
 	if err != nil {
-		fmt.Println("CWapi 2.0.2 startup degraded:", err.Error())
+		fmt.Println("CWapi 2.0.3 startup degraded:", err.Error())
 	}
 
 	a.tray = tray.New(a.showMainWindow, a.requestShutdown)

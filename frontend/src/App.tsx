@@ -269,7 +269,7 @@ export default function App() {
       <header className="titlebar">
         <div className="brand-row">
           <div className="logo">CW</div>
-          <div><strong>CWapi</strong><span>2.0.2</span></div>
+          <div><strong>CWapi</strong><span>2.0.3</span></div>
         </div>
         <button className="window-button" onClick={WindowHide} aria-label="缩小到托盘" title="缩小到托盘">×</button>
       </header>

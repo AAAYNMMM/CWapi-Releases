@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-[![Release](https://img.shields.io/github/v/release/AAAYNMMM/chatgpt-work-api-Releases?filter=v2.0.2&style=flat-square&label=Release)](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/tag/v2.0.2)
+[![Release](https://img.shields.io/github/v/release/AAAYNMMM/chatgpt-work-api-Releases?filter=v2.0.3&style=flat-square&label=Release)](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/tag/v2.0.3)
 ![Windows](https://img.shields.io/badge/Windows-11%20x64-0078d4?style=flat-square)
 ![MCP](https://img.shields.io/badge/MCP-Coding%20%2B%20Agent-6f42c1?style=flat-square)
 ![OpenAI compatible](https://img.shields.io/badge/API-OpenAI--compatible-10a37f?style=flat-square)
@@ -14,7 +14,7 @@ CWapi 2.0 provides two isolated bridges:
 - **Coding** lets ChatGPT Web read, edit, build, test, and operate a local Git workspace through MCP.
 - **Agent** exposes a localhost OpenAI-compatible API so compatible local software can send model requests to Web GPT through an Agent MCP bridge.
 
-Current release: **`2.0.2`**.
+Current release: **`2.0.3`**.
 
 ## What is CWapi?
 
@@ -122,7 +122,7 @@ The two lines are not configuration-compatible. Read the [Version Guide](docs/VE
 
 ## 5-minute quick start
 
-1. Download [`CWapi-v2.0.2.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.2/CWapi-v2.0.2.zip).
+1. Download [`CWapi-v2.0.3.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.3/CWapi-v2.0.3.zip).
 2. Fully extract it to a user-writable directory and run `CWapi.exe`.
 3. For **Coding**, create an OpenAI Secure MCP Tunnel, obtain its Tunnel ID and Runtime API key, then enter them in the Coding Tunnel panel.
 4. In ChatGPT, use a workspace/plan that supports the MCP capabilities you need, enable the applicable Developer Mode/custom-app flow, and connect the matching Tunnel. ChatGPT cannot directly connect to CWapi's `127.0.0.1` MCP URL.
@@ -149,7 +149,7 @@ If you move the **entire** extracted CWapi directory, its adjacent `CWapi-data` 
 
 ## Files and images
 
-CWapi 2.0.2 does not transfer files or images through Coding or Agent MCP. Source, Markdown, JSON, logs, and other inspectable repository text are read with bounded `coding_exec` commands.
+CWapi 2.0.3 does not transfer files or images through Coding or Agent MCP. Source, Markdown, JSON, logs, and other inspectable repository text are read with bounded `coding_exec` commands.
 
 Agent accepts text and tool JSON only. Top-level `attachments` is rejected with `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`; non-text message content such as `image_url` is rejected with `AGENT_MEDIA_INPUT_UNSUPPORTED`.
 
@@ -195,15 +195,15 @@ Read [Security](docs/SECURITY.md) for the detailed boundary.
 
 ## Release tracks
 
-- [`main`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/main): CWapi 2.x, current release `2.0.2`.
+- [`main`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/main): CWapi 2.x, current release `2.0.3`.
 - [`1.6.x`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/1.6.x): CWapi 1.6.x legacy line, current release `1.6.3`.
 
 ## Development repository vs release repository
 
 This repository contains clean release-facing source snapshots, portable releases, and user documentation. Development history, tests, validation/package automation, and release engineering live in [`AAAYNMMM/CWapi`](https://github.com/AAAYNMMM/CWapi).
 
-CWapi 2.0.2 was built from development commit:
+CWapi 2.0.3 was built from development commit:
 
 ```text
-05068c482a617c6beb2acd5c6d2ff15cfedc7598
+8941aa5d41768993c01e7798678a485f56331691
 ```

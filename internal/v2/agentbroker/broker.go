@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AAAYNMMM/CWapi/internal/v2/agentprotocol"
 	"github.com/AAAYNMMM/CWapi/internal/v2/mcpserver"
 )
 
@@ -57,17 +58,14 @@ type Snapshot struct {
 	LastError   string `json:"last_error,omitempty"`
 }
 
-type Completion struct {
-	Content      any
-	ToolCalls    any
-	FinishReason string
-}
+type Completion = agentprotocol.Completion
 
 type request struct {
 	id            string
 	bridgeID      string
 	taskID        string
 	correlationID string
+	conversation  agentprotocol.Conversation
 	payload       map[string]any
 	payloadBytes  int
 	model         string
@@ -265,7 +263,7 @@ func (b *Broker) Close(_ context.Context, _ mcpserver.AgentCloseInput) (mcpserve
 	b.closeBridgeLocked("AGENT_BRIDGE_CLOSED")
 	return mcpserver.AgentCloseOutput{State: "closed"}, nil
 }
-func (b *Broker) Enqueue(payload map[string]any, model string, stream bool) (*RequestHandle, error) {
+func (b *Broker) Enqueue(conversation agentprotocol.Conversation) (*RequestHandle, error) {
 	if b == nil {
 		return nil, errors.New("AGENT_BROKER_UNAVAILABLE")
 	}
@@ -283,18 +281,21 @@ func (b *Broker) Enqueue(payload map[string]any, model string, stream bool) (*Re
 	if b.activeCountLocked() >= b.cfg.MaxPending {
 		return nil, errors.New("AGENT_BUSY")
 	}
-	payloadCopy := cloneMap(payload)
+	payloadCopy, err := agentprotocol.EncodeBridgeRequest(conversation)
+	if err != nil {
+		return nil, err
+	}
 	payloadJSON, _ := json.Marshal(payloadCopy)
 	if len(payloadJSON) > b.cfg.MaxBatchBytes {
 		return nil, errors.New("AGENT_REQUEST_TOO_LARGE")
 	}
 	now = now.UTC()
 	requestID := "request_" + rand.Text()
-	taskID, correlationID := requestIdentity(payloadCopy)
+	taskID, correlationID := requestIdentity(conversation.Metadata)
 	req := &request{
 		id: requestID, bridgeID: b.bridgeID, taskID: taskID, correlationID: correlationID,
-		payload: payloadCopy, payloadBytes: len(payloadJSON),
-		model: strings.TrimSpace(model), stream: stream, created: now, deadline: now.Add(b.cfg.RequestTimeout),
+		conversation: conversation, payload: payloadCopy, payloadBytes: len(payloadJSON),
+		model: strings.TrimSpace(conversation.Model), stream: conversation.Stream, created: now, deadline: now.Add(b.cfg.RequestTimeout),
 		state: StateQueued, done: make(chan struct{}),
 	}
 	b.requests[req.id] = req
@@ -366,7 +367,7 @@ func (b *Broker) acceptResponsesLocked(bridgeID string, responses []mcpserver.Ag
 			results = append(results, result)
 			continue
 		}
-		canonical, err := normalizeCompletion(response.Response, nil)
+		canonical, err := agentprotocol.DecodeBridgeCompletion(response.Response, nil)
 		if err != nil {
 			result.State, result.Error = "rejected", errorCode(err)
 			results = append(results, result)
@@ -397,7 +398,7 @@ func (b *Broker) acceptResponsesLocked(bridgeID string, responses []mcpserver.Ag
 			results = append(results, result)
 			continue
 		}
-		completion, err := normalizeCompletion(response.Response, req.payload)
+		completion, err := agentprotocol.DecodeBridgeCompletion(response.Response, &req.conversation)
 		if err != nil {
 			result.State, result.Error = "rejected", errorCode(err)
 			results = append(results, result)
@@ -659,10 +660,14 @@ func cloneMap(value map[string]any) map[string]any {
 	return copy
 }
 
-func requestIdentity(payload map[string]any) (string, string) {
-	metadata, _ := payload["metadata"].(map[string]any)
+func requestIdentity(metadata map[string]any) (string, string) {
 	if len(metadata) == 0 {
 		return "", ""
 	}
-	return strings.TrimSpace(stringValue(metadata["task_id"])), strings.TrimSpace(stringValue(metadata["correlation_id"]))
+	return strings.TrimSpace(textValue(metadata["task_id"])), strings.TrimSpace(textValue(metadata["correlation_id"]))
+}
+
+func textValue(value any) string {
+	text, _ := value.(string)
+	return text
 }

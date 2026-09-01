@@ -42,7 +42,7 @@ Continue all later Coding calls with the same `repository_url`. Do not open a se
 
 ### Files and images
 
-CWapi 2.0.2 does not transfer files or images through Coding MCP. There is no attachment tool and the MCP layer does not emit `ImageContent` or `EmbeddedResource`.
+CWapi 2.0.3 does not transfer files or images through Coding MCP. There is no attachment tool and the MCP layer does not emit `ImageContent` or `EmbeddedResource`.
 
 Read source, Markdown, JSON, logs, configuration and other text directly through `coding_exec`, using exact tools such as `rg`, `git show`, PowerShell text reads or repository-specific commands. Prefer bounded, relevant output rather than moving whole files when only part of a file is needed.
 

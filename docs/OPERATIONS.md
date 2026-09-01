@@ -42,7 +42,7 @@ Model:    cwapi-web-gpt
 
 ## Images and files
 
-CWapi 2.0.2 does not provide file or image transfer.
+CWapi 2.0.3 does not provide file or image transfer.
 
 For Coding, read source, Markdown, JSON, logs and other inspectable text through bounded `coding_exec`; there is no attachment tool.
 

@@ -23,7 +23,9 @@ CWapi.exe (Wails)
 │  ├─ durable workspace manager
 │  └─ private Codex model-free command toolhost
 └─ Agent service
-   ├─ bounded broker
+   ├─ OpenAI-compatible protocol adapter
+   ├─ canonical conversation + context optimizer
+   ├─ bounded broker / MCP bridge
    └─ loopback OpenAI-compatible Provider
 ```
 
@@ -68,14 +70,22 @@ Web GPT 是 Coding 链唯一的推理 agent。每次 `coding_exec` 都把严格 
 local software
   -> POST 127.0.0.1:<agent-port>/v1/chat/completions
   -> Bearer API key
-  -> normalize + bounded broker
+  -> OpenAI Compatible Adapter
+  -> CWapi canonical conversation
+  -> deterministic Context Optimizer
+  -> bounded broker / MCP bridge
   -> agent_exchange batch claim
   -> Web GPT
-  -> agent_exchange batch responses
+  -> agent_exchange response -> canonical completion
+  -> OpenAI Compatible Adapter
   -> OpenAI-compatible JSON or keepalive SSE
 ```
 
-Agent 只有一个 active bridge，重复 `agent_open` 会恢复并续租同一 bridge。Web GPT 是唯一任务规划与决策主体；CWapi 只维护 bridge/OpenAI request 状态，本地软件只执行工具。第三方 command/session 生命周期不属于 broker，不能从 MCP `request_id` 或 `no_request` 推断。
+Agent 只有一个 active bridge，重复 `agent_open` 会恢复并续租同一 bridge。Web GPT 是本地 Agent 软件实际使用的模型，也是唯一任务规划与决策主体；CWapi 只做协议转换、确定性上下文优化和 bridge/OpenAI request 状态维护，本地软件只执行工具。没有第二个本地推理模型。第三方 command/session 生命周期不属于 broker，不能从 MCP `request_id` 或 `no_request` 推断。
+
+`internal/v2/agentprotocol` 是 2.0.3 的正式协议边界：Adapter 将外部协议映射到轻量 canonical message/tool/completion/error/stream 类型；Context Optimizer 删除未映射的客户端私有字段，规范化 metadata、JSON tool result 与可证明重复的 system/developer/tool 状态；bridge codec 再生成稳定的 MCP request，并将 Web GPT response 转回 canonical completion。Broker 不再解析客户端协议。当前注册的是 OpenAI-compatible adapter；接口允许后续增加真实需要的 adapter，但不宣称支持所有 Agent 软件。
+
+Adapter 能力明确报告 `streaming/tools/parallel_tools=true`、`images/files=false`。不支持的文件、图片或无法关联的 tool result/call 会在协议边界返回稳定错误，不交给 Web GPT 猜测。角色与 tool call ID 在往返转换中保持；unknown fields 默认不会穿过 canonical bridge。当前 SSE 仍是 keepalive 加完成后的 buffered chunks，不伪造 token-level stream，但 canonical `StreamChunk` 与 adapter 双向转换保留未来真实流式扩展点。
 
 每次 `agent_exchange` 原子提交上一批响应，默认最多 4 个 in-flight；已完成 response 会立即唤醒本地 HTTP request。非-tool-call终态 response 以 `state=responses` 立即向 Web GPT 确认；若任一 response 返回 `tool_calls`，当前 exchange 保持 bounded wait 并可直接领取本地工具执行后产生的 follow-up OpenAI request。只有真实 wait timeout 返回 `no_request`。claimed request 使用相同 request ID 与递增 delivery 至少一次投递。相同响应可幂等重交，不同响应冲突拒绝；一个无效响应不影响同批其他 request。bridge lease 过期、close、client disconnect 与 timeout 都有明确终态和清理，仍在处理的 claimed request 会固定 bridge lease。
 
