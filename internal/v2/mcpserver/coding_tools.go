@@ -3,20 +3,16 @@ package mcpserver
 import (
 	"context"
 	"errors"
-	"net/url"
 	"strings"
 
-	"github.com/AAAYNMMM/CWapi/internal/repository"
-	"github.com/AAAYNMMM/CWapi/internal/v2/attachments"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
-	ToolCodingOpen       = "coding_open"
-	ToolCodingExec       = "coding_exec"
-	ToolCodingStatus     = "coding_status"
-	ToolCodingAttachment = "coding_attachment"
-	ToolCodingClose      = "coding_close"
+	ToolCodingOpen   = "coding_open"
+	ToolCodingExec   = "coding_exec"
+	ToolCodingStatus = "coding_status"
+	ToolCodingClose  = "coding_close"
 )
 
 type CodingOpenInput struct {
@@ -41,7 +37,7 @@ type CodingExecInput struct {
 	Command        string   `json:"command" jsonschema:"executable name or forward-slash path; do not include shell quoting"`
 	Argv           []string `json:"argv,omitempty" jsonschema:"exact argument vector"`
 	CWD            string   `json:"cwd,omitempty" jsonschema:"optional forward-slash relative directory inside the prepared repository"`
-	TimeoutSeconds int      `json:"timeout_seconds,omitempty" jsonschema:"optional command timeout from 1 to 180 seconds"`
+	TimeoutSeconds int      `json:"timeout_seconds,omitempty" jsonschema:"optional command timeout from 1 to 600 seconds"`
 }
 
 type CodingExecOutput struct {
@@ -68,19 +64,6 @@ type CodingStatusOutput struct {
 	LastError      string `json:"last_error,omitempty"`
 }
 
-type CodingAttachmentInput struct {
-	RepositoryURL string   `json:"repository_url" jsonschema:"Git repository URL used to locate the repository's active Coding session"`
-	Paths         []string `json:"paths" jsonschema:"one or more forward-slash relative image paths inside the prepared repository; ordinary files are not supported"`
-}
-
-type CodingAttachmentOutput struct {
-	Repository   string                 `json:"repository"`
-	State        string                 `json:"state"`
-	TotalBytes   int64                  `json:"total_bytes"`
-	Attachments  []attachments.Metadata `json:"attachments"`
-	ContentItems []attachments.Item     `json:"-"`
-}
-
 type CodingCloseInput struct {
 	RepositoryURL string `json:"repository_url" jsonschema:"Git repository URL whose current active Coding session should be closed"`
 }
@@ -94,7 +77,6 @@ type CodingService interface {
 	Open(context.Context, CodingOpenInput) (CodingOpenOutput, error)
 	Exec(context.Context, CodingExecInput) (CodingExecOutput, error)
 	Status(context.Context, CodingStatusInput) (CodingStatusOutput, error)
-	Attachment(context.Context, CodingAttachmentInput) (CodingAttachmentOutput, error)
 	Close(context.Context, CodingCloseInput) (CodingCloseOutput, error)
 }
 
@@ -138,40 +120,6 @@ func RegisterCoding(server *mcp.Server, service CodingService) error {
 		}
 		output, err := service.Status(ctx, input)
 		return nil, output, err
-	})
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        ToolCodingAttachment,
-		Description: "Return one or more raster images from repository_url's active workspace as native MCP ImageContent. Ordinary text, PDF, archive, document and other file attachments are not supported; read text through coding_exec instead.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, input CodingAttachmentInput) (*mcp.CallToolResult, CodingAttachmentOutput, error) {
-		input.RepositoryURL = strings.TrimSpace(input.RepositoryURL)
-		if input.RepositoryURL == "" || len(input.Paths) == 0 {
-			return nil, CodingAttachmentOutput{}, errors.New("CODING_ATTACHMENT_INPUT_INVALID")
-		}
-		output, err := service.Attachment(ctx, input)
-		if err != nil {
-			return nil, output, err
-		}
-		for _, item := range output.ContentItems {
-			if item.Metadata.Kind != "image" {
-				return nil, CodingAttachmentOutput{}, errors.New("CODING_ATTACHMENT_IMAGE_ONLY")
-			}
-		}
-		repositoryKey := output.Repository
-		if repositoryKey == "" {
-			if identity, parseErr := repository.Parse(input.RepositoryURL); parseErr == nil {
-				repositoryKey = identity.Repository
-			}
-		}
-		result := &mcp.CallToolResult{}
-		for _, item := range output.ContentItems {
-			ref := strings.TrimSpace(item.Metadata.Ref)
-			if ref == "" {
-				ref = item.Metadata.Name
-			}
-			uri := "cwapi://coding/" + url.PathEscape(repositoryKey) + "/" + url.PathEscape(ref) + "/" + url.PathEscape(item.Metadata.Name)
-			result.Content = append(result.Content, attachments.MCPContent(item, "repository="+repositoryKey, uri)...)
-		}
-		return result, output, nil
 	})
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        ToolCodingClose,

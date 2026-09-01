@@ -20,6 +20,7 @@ import (
 const (
 	bridgeName           = ".cwapi-process-bridge.cmd"
 	maxBatchPayloadBytes = 32 * 1024
+	maxBatchSearchPath   = 6 * 1024
 )
 
 var executableExtensions = []string{".com", ".exe", ".cmd", ".bat"}
@@ -31,7 +32,22 @@ func New(environment []string) (*Resolver, error) {
 	if path == "" || systemRoot == "" || !filepath.IsAbs(systemRoot) {
 		return nil, errors.New("INVOCATION_ENVIRONMENT_INVALID")
 	}
+	path, err := normalizeSearchPath(path)
+	if err != nil {
+		return nil, err
+	}
 	return &Resolver{environment: copyEnv, path: path, systemRoot: filepath.Clean(systemRoot)}, nil
+}
+
+// ResolvePATHExecutable resolves a bare executable name only through the
+// Resolver's bounded PATH. It is used to pin identities that may receive
+// command-specific privileges.
+func (r *Resolver) ResolvePATHExecutable(command string) (string, error) {
+	command = strings.TrimSpace(command)
+	if r == nil || command == "" || strings.ContainsAny(command, `/\\:`) {
+		return "", errors.New("INVOCATION_PATH_EXECUTABLE_INVALID")
+	}
+	return r.resolveExecutable("", command)
 }
 
 func (r *Resolver) Resolve(repositoryRoot string, input processcontract.StartArguments) (Final, error) {
@@ -149,7 +165,7 @@ func (r *Resolver) wrapBatch(final *Final) error {
 		return errors.New("INVOCATION_SYSTEM_CMD_INVALID")
 	}
 	final.Executable = cmdPath
-	final.Argv = []string{"/d", "/s", "/v:off", "/c", bridgeName, binding}
+	final.Argv = []string{"/d", "/s", "/v:on", "/c", bridgeName, binding, r.path}
 	final.BindingPayload = binding
 	final.BridgePath = bridgePath
 	final.BridgeCreated = bridgeCreated
@@ -170,12 +186,44 @@ func (r *Resolver) wrapBatch(final *Final) error {
 
 func batchBridgeBody(argumentCount int) string {
 	var builder strings.Builder
-	builder.WriteString("@echo off\r\nsetlocal EnableDelayedExpansion\r\n\"!CWAPI_INTERNAL_TARGET!\"")
+	builder.WriteString("@echo off\r\nset \"PATH=%~2\"\r\n\"!CWAPI_INTERNAL_TARGET!\"")
 	for index := 0; index < argumentCount; index++ {
 		fmt.Fprintf(&builder, " \"!CWAPI_INTERNAL_ARG_%03d!\"", index)
 	}
 	builder.WriteString("\r\n")
 	return builder.String()
+}
+
+func normalizeSearchPath(value string) (string, error) {
+	directories := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, raw := range filepath.SplitList(value) {
+		directory := strings.Trim(strings.TrimSpace(raw), `"`)
+		if directory == "" || !filepath.IsAbs(directory) {
+			continue
+		}
+		directory = filepath.Clean(directory)
+		if strings.ContainsAny(directory, "\"!\r\n") {
+			return "", errors.New("INVOCATION_SEARCH_PATH_UNREPRESENTABLE")
+		}
+		if info, err := os.Stat(directory); err != nil || !info.IsDir() {
+			continue
+		}
+		key := strings.ToLower(directory)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		directories = append(directories, directory)
+	}
+	if len(directories) == 0 {
+		return "", errors.New("INVOCATION_SEARCH_PATH_INVALID")
+	}
+	result := strings.Join(directories, string(os.PathListSeparator))
+	if len(result) > maxBatchSearchPath {
+		return "", errors.New("INVOCATION_SEARCH_PATH_TOO_LARGE")
+	}
+	return result, nil
 }
 
 func ensureBridge(path, expected string) (bool, error) {

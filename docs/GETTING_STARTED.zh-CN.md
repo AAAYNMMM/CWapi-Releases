@@ -11,11 +11,11 @@ Coding：ChatGPT Web -> Secure MCP Tunnel -> Coding MCP -> 本地 Git workspace
 Agent： 本地 OpenAI-compatible 客户端 -> CWapi /v1 -> Agent MCP -> Secure MCP Tunnel -> ChatGPT Web
 ```
 
-## 1. 下载 CWapi 2.0.0
+## 1. 下载 CWapi 2.0.2
 
 下载正式 Windows portable：
 
-[`CWapi-v2.0.0.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.0/CWapi-v2.0.0.zip)
+[`CWapi-v2.0.2.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.2/CWapi-v2.0.2.zip)
 
 完整解压到当前 Windows 用户可写目录，然后运行：
 
@@ -129,11 +129,10 @@ CWapi 会把 Tunnel ID 写入 `CWapi-data/config/cwapi.json`，Runtime API key �
 coding_open
 coding_exec
 coding_status
-coding_attachment
 coding_close
 ```
 
-如果这 5 个工具没出现，先查 [故障排查](TROUBLESHOOTING.zh-CN.md)，不要还没通车就开始研究怎么漂移过弯。
+如果这 4 个工具没出现，先查 [故障排查](TROUBLESHOOTING.zh-CN.md)，不要还没通车就开始研究怎么漂移过弯。
 
 ## 8. 第一次 Coding 测试
 
@@ -210,7 +209,7 @@ agent_close
 5. 连续任务期间保持 exchange loop；
 6. 真正结束后才调用 `agent_close()`。
 
-一次 `no_request` 不代表 bridge 应该关掉重开。
+一次 `no_request` 不代表 bridge 应该关掉重开。它只表示 bounded wait 到期前没有新的本地 OpenAI request，不代表本地命令仍在运行，也不能单独作为继续等待的理由。
 
 ## 12. 配置本地 OpenAI-compatible 客户端
 
@@ -259,11 +258,11 @@ CWapi 给本地软件返回 Chat Completions response
 - **429**：有界 queue 已忙；
 - **504**：Web GPT 没在默认 180 秒 request timeout 内完成请求。
 
-## 14. 第一次测试不要拿普通文件折腾
+## 14. 文件与媒体不经过这两条 MCP 链路传输
 
-Coding 的 `coding_attachment` 只接受经过校验的 workspace raster image。Agent 只接受标准 Chat Completions `image_url` data URI inline raster image。
+Coding MCP 没有文件/图片传输工具。Agent 只接受文本与 tool JSON：顶层 `attachments` 返回 `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`，`image_url` 等任何非文本 message content part 返回 `AGENT_MEDIA_INPUT_UNSUPPORTED`。
 
-Agent generic `attachments` 会返回 `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`。上传到 ChatGPT 对话里的文件也不会被自动复制到 Coding workspace 或 Agent 本地软件。
+上传到 ChatGPT 对话里的文件不会被自动复制到 Coding workspace 或 Agent 本地软件。
 
 ## 下一步
 

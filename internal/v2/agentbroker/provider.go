@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	maxRequestBody              = 24 * 1024 * 1024
+	maxRequestBody              = DefaultMaxBatchBytes
 	defaultSSEHeartbeatInterval = 15 * time.Second
 )
 
@@ -173,17 +173,16 @@ func (p *Provider) handleChatCompletions(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusRequestEntityTooLarge, "request_too_large")
 		return
 	}
-	sanitizedBody, attachmentBatch, err := extractRequestAttachments(body)
+	if err := rejectTransferInputs(body); err != nil {
+		writeError(w, http.StatusBadRequest, errorCode(err))
+		return
+	}
+	payload, model, stream, err := normalizeChatRequest(body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, errorCode(err))
 		return
 	}
-	payload, model, stream, err := normalizeChatRequest(sanitizedBody)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, errorCode(err))
-		return
-	}
-	handle, err := p.broker.EnqueueWithAttachments(payload, model, stream, attachmentBatch)
+	handle, err := p.broker.Enqueue(payload, model, stream)
 	if err != nil {
 		switch errorCode(err) {
 		case "AGENT_BRIDGE_UNAVAILABLE":

@@ -42,9 +42,9 @@ Web GPT
   -> edit/test/commit/push result
 ```
 
-Coding MCP 对外暴露五个工具：`coding_open`、`coding_exec`、`coding_status`、`coding_attachment`、`coding_close`。
+Coding MCP 对外暴露四个工具：`coding_open`、`coding_exec`、`coding_status`、`coding_close`。
 
-`coding_attachment` 不是通用文件导出，而是**图片专用路径**。它只把 workspace 中受支持的 raster image 以原生 MCP `ImageContent` 交给 Web GPT。文本、源码、JSON、日志、PDF、ZIP、DOCX 等普通文件不生成 `EmbeddedResource`；需要的可读内容通过 exact `coding_exec` 获取。
+Coding 不提供文件或图片 MCP 传输。文本、源码、JSON、日志等需要的 workspace 内容通过 exact `coding_exec` 获取。
 
 一个 repository 同时最多一个 active coding handle。首次使用 clone，后续 fetch；`expected_commit` 如提供则必须是目标 ref 解析出的完整 SHA。新任务遇到 tracked dirty 会拒绝，`resume=true` 可保留工作树继续。
 
@@ -60,7 +60,7 @@ Web GPT 是 Coding 链唯一的推理 agent。每次 `coding_exec` 都把严格 
 
 `coding_status` 只读本地 HEAD、tracking ref、dirty 与 divergence，不执行隐式 fetch，也不读取 Codex transcript。
 
-SAFE 映射上游 `workspaceWrite`；`.git` 被上游沙箱保护。FULL 映射 `dangerFullAccess`。CWapi 不实现第二套提权或 token fallback。
+每条 Coding 命令在 resolver 产生最终 executable/argv/CWD 后先通过 CWapi 永久执行策略，再调用 app-server。SAFE 映射上游 `workspaceWrite` 并使用命令级 workspace-local Temp/cache/profile；FULL 对所有通过永久策略的命令映射 `dangerFullAccess`，并恢复当前 Windows 用户的 profile/AppData 环境。网络仍是独立、默认关闭的能力；只有已显式启用网络的直接 FULL push 会额外恢复宿主 Git config/credential helper。破坏性 Git、凭据读取、禁止系统工具与 protected-path 规则不会因 FULL 失效。CWapi 不实现 reusable elevation token 或 fallback。
 
 ## Agent vertical
 
@@ -75,11 +75,13 @@ local software
   -> OpenAI-compatible JSON or keepalive SSE
 ```
 
-Agent 只有一个 active bridge，重复 `agent_open` 会恢复并续租同一 bridge。每次 `agent_exchange` 原子提交上一批响应并领取下一批，默认最多 4 个 in-flight；claimed request 使用相同 request ID 与递增 delivery 至少一次投递。相同响应可幂等重交，不同响应冲突拒绝；一个无效响应不影响同批其他 request。bridge lease 过期、close、client disconnect 与 timeout 都有明确终态和清理，仍在处理的 claimed request 会固定 bridge lease。
+Agent 只有一个 active bridge，重复 `agent_open` 会恢复并续租同一 bridge。Web GPT 是唯一任务规划与决策主体；CWapi 只维护 bridge/OpenAI request 状态，本地软件只执行工具。第三方 command/session 生命周期不属于 broker，不能从 MCP `request_id` 或 `no_request` 推断。
 
-Agent 只保留**图片输入**：本地软件可在标准 Chat Completions `image_url` 中使用 `data:` URI 携带 raster image。Provider 在 broker 入队前验证并剥离图片 bytes；broker 只保留 metadata 和 request-scoped 临时图片，`agent_exchange` 再以原生 MCP `ImageContent` 交给 Web GPT。
+每次 `agent_exchange` 原子提交上一批响应，默认最多 4 个 in-flight；已完成 response 会立即唤醒本地 HTTP request。非-tool-call终态 response 以 `state=responses` 立即向 Web GPT 确认；若任一 response 返回 `tool_calls`，当前 exchange 保持 bounded wait 并可直接领取本地工具执行后产生的 follow-up OpenAI request。只有真实 wait timeout 返回 `no_request`。claimed request 使用相同 request ID 与递增 delivery 至少一次投递。相同响应可幂等重交，不同响应冲突拒绝；一个无效响应不影响同批其他 request。bridge lease 过期、close、client disconnect 与 timeout 都有明确终态和清理，仍在处理的 claimed request 会固定 bridge lease。
 
-顶层通用 `attachments` 文件扩展固定拒绝，文本/PDF/archive/document 等普通文件不进入 broker 附件链，也不生成 MCP `EmbeddedResource`。完成、超时、客户端断开、bridge close、shutdown 与下次启动都会清理临时图片。
+Broker 维护单调 state revision，并在 exchange output 中返回 changed/pending/inflight/active/idle/waited/last-state/next-action activity。`no_request` 只表示 bounded wait 内没有新 OpenAI request；连续无 transition 的 idle count 为 Web GPT 提供防空转信号。Returned request 还包含 created/claimed/last-delivered/deadline 时间。本地 client 可通过标准 `metadata.task_id` / `metadata.correlation_id` 提供跨 request 稳定关联；CWapi 不凭语言内容伪造 task 或 process 状态。
+
+Agent 不提供文件或图片输入通道。Provider 只接受文本与 tool JSON；顶层 `attachments` 以及 message content 中非 `text` part（包括 `image_url`）都在 broker 入队前拒绝，`agent_exchange` 不生成 MCP 文件或图片 content。
 
 ## 启动与重配置
 
@@ -92,7 +94,7 @@ Agent 只保留**图片输入**：本地软件可在标准 Chat Completions `ima
 5. Coding/Agent Tunnel 各自启用时分别启动对应的 bundled tunnel-client；
 6. 发布 bounded Desktop snapshot。
 
-Desktop 的 SAFE/FULL access profile 使用原子配置保存 + 当前 Coding runtime 热更新，不重启 Service，也不失效 active internal Coding session；在执行中的 command 保持其启动时 sandbox，后续 command 使用新 profile。其它 Desktop 配置修改仍先检查 active Coding 与 pending/claimed Agent，允许后执行 atomic save + Service restart；启动失败则恢复原配置并重启原 Service。
+Desktop 的 SAFE/FULL access profile 与 Coding network capability 都使用原子配置保存 + 当前 Coding runtime 热更新，不重启 Service，也不失效 active internal Coding session；在执行中的 command 保持其启动时 sandbox/network，后续 command 使用新设置。其它 Desktop 配置修改仍先检查 active Coding 与 pending/claimed Agent，允许后执行 atomic save + Service restart；启动失败则恢复原配置并重启原 Service。
 Tunnel Runtime API key 不进入 config；启用后由 Service 从各自的 Windows Credential Manager 条目读取，并只通过环境变量注入对应的 bundled tunnel child process。两个 tunnel-client 使用独立 profile、工作目录和 `main` 转发目标。
 任一 tunnel-client 异常退出后，本地 Manager 会以指数退避自动重启最多 3 次；关闭或重配置会取消待执行的重启。
 

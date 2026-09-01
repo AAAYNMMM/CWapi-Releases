@@ -9,7 +9,7 @@ import (
 
 const (
 	Schema  = "cwapi.config.v3"
-	Version = "2.0.0"
+	Version = "2.0.2"
 
 	DefaultMCPPort   = 32124
 	DefaultAgentPort = 32123
@@ -38,6 +38,7 @@ type MCPConfig struct {
 type CodexConfig struct {
 	Executable    string `json:"executable"`
 	AccessProfile string `json:"access_profile"`
+	NetworkAccess bool   `json:"network_access"`
 }
 
 type AgentConfig struct {
@@ -73,7 +74,7 @@ func Default() Config {
 			CodingToken: NewCodingToken(),
 			AgentToken:  NewAgentToken(),
 		},
-		Codex: CodexConfig{AccessProfile: AccessProfileSafe},
+		Codex: CodexConfig{AccessProfile: AccessProfileSafe, NetworkAccess: false},
 		Agent: AgentConfig{
 			Enabled: true,
 			Port:    DefaultAgentPort,

@@ -10,7 +10,7 @@ The Service exposes current structured state only:
 - Codex runtime/access profile/active Coding handles；
 - workspace count and maintenance summaries；
 - Agent Provider address/state；
-- bridge Offline/Ready/Busy, pending/claimed/completed；
+- bridge Offline/Ready/Busy, pending/claimed/completed, monotonic request-state revision and unchanged idle count；
 - latest bounded error code/message。
 
 ## Coding output
@@ -21,7 +21,9 @@ The Service exposes current structured state only:
 
 Broker state records request IDs, counts, lifecycle state and bounded error codes. Normal operation does not persist full `messages`, answer content, tool schemas, tool arguments or tool results.
 
-Agent attachment bytes are request-scoped temporary data, not observability output. Runtime snapshots expose only bounded attachment metadata carried by the active exchange; no attachment body is copied into logs or transcripts. Terminal request paths, broker shutdown and the next startup remove the temporary attachment tree.
+Agent has no file/image attachment pipeline. Runtime snapshots and logs therefore contain only request lifecycle metadata and bounded errors, never file or image bodies.
+
+Agent activity is request-plane observability only. `request_id`, revision, pending/inflight and `no_request` never claim that a third-party command is running. Optional client-supplied task/correlation metadata may be carried in the request payload but is not promoted into logs as command truth.
 
 ## MCP instructions
 

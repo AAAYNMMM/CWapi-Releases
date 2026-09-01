@@ -30,6 +30,8 @@ CWapi Provider response
 
 本地 Provider 只绑定 `127.0.0.1`。
 
+Web GPT 是唯一规划者和任务控制器。CWapi 只维护 bridge/OpenAI request 状态；本地软件执行自己的工具，并拥有 command/process session。MCP `request_id` 只是通信事务 ID，绝不是本地进程 session ID。
+
 ## 本地 Provider 配置
 
 默认：
@@ -122,6 +124,10 @@ CWapi 接收 responses，同时返回下一批 request
 
 `agent_exchange` 故意把“提交已完成 response + 等下一批 request”合成一个原子操作，减少没有意义的 MCP 往返。
 
+不含 tool call 的 response 会立即以顶层 `state=responses` 确认。提交的 response 含 `tool_calls` 时，同一次 exchange 会继续 bounded wait，以便直接返回本地软件随后发出的 tool-result OpenAI request。本地 HTTP waiter 在 response 被接受时立即释放。
+
+每个成功 exchange 都带结构化 `activity`：单调递增的状态 revision、changed/pending/inflight/active、连续不变 idle 次数、等待时长、最后 broker 状态/错误和 next-action 提示。`state=no_request` 只用于真实 bounded wait 超时且没有新 OpenAI request 的情况。
+
 ## `request_id`
 
 每个本地模型 request 都有准确 `request_id`，它是公开关联键，必须原样保留。
@@ -129,6 +135,8 @@ CWapi 接收 responses，同时返回下一批 request
 因为可以同时存在多个 request，不能按“谁先来”“prompt 看起来像哪条”“我觉得大概是这个”来关联。软件工程已经够多玄学了，这里至少有 ID 可用。
 
 `delivery > 1` 表示**同一个 request_id 被重新投递**，不是新任务。如果 Web GPT 已经完成它，就安全重发同一个完成 response，不要给同一个 request 编一个新答案。
+
+returned request 还带 created/claimed/last-delivered/deadline 时间。本地 client 可以提供有界顶层 `metadata.task_id` / `metadata.correlation_id`；CWapi 保留这些 client-supplied 标识，但不会拿无关 request ID 猜测 task ID。
 
 ## 多请求与限制
 
@@ -173,46 +181,17 @@ CWapi 把 tool_calls 返回本地软件
 
 只有后一个调用真的依赖前一个结果时才串行。把互不依赖的工具硬拆成很多模型轮次，只会反复重发 prompt 和 tool schema，机器和人类一起浪费时间。
 
+Function `arguments` 可以使用 OpenAI JSON string，也可以直接传原生 JSON object；JSON response `content` 也可以是原生值。CWapi 会把它们规范化为 OpenAI-compatible string，减少 JSON 套 JSON 和 Windows 路径转义失败，同时保持等价 duplicate response 的幂等性。
+
 ## 文本回答
 
 Web GPT 可以返回普通 assistant content。CWapi 会把 Agent response 规范化为本地客户端期待的 OpenAI-compatible Chat Completions message / finish_reason。
 
 支持非 streaming 和 streaming。streaming 会输出 Chat Completions SSE chunks，并以 `[DONE]` 结束。
 
-## Inline 图片
+## 文件和媒体不支持
 
-Agent 只通过标准 Chat Completions message content 的 `image_url` data URI 支持有界 raster image：
-
-```json
-{
-  "type": "image_url",
-  "image_url": {
-    "url": "data:image/png;base64,..."
-  }
-}
-```
-
-CWapi 会：
-
-1. 校验 data URI 和 raster image；
-2. 在 request 进入 broker 前，把原始图片 bytes 从 JSON payload 剥离；
-3. 图片只按该 request 生命周期临时保存；
-4. `agent_exchange` 返回 metadata + 原生 MCP `ImageContent`；
-5. terminal request、broker shutdown 和下次 startup 时清理临时图片。
-
-当前 Agent 图片限制：
-
-- 最多 8 张；
-- 单张最多 8 MiB；
-- 单批图片最多 16 MiB；
-- 单边最多 2048 px；
-- 只接受 raster，SVG 不支持。
-
-HTTP body hard limit 是 24 MiB，用于容纳 base64/JSON 开销。图片抽离以后，普通 broker JSON request/batch 仍限制为 1 MiB。
-
-## 普通文件不支持
-
-如果本地软件发这种顶层 generic file 扩展：
+Agent 只接受文本与 tool JSON。如果本地软件发送这种顶层 attachment 扩展：
 
 ```json
 {"attachments": [...]}
@@ -226,13 +205,23 @@ AGENT_FILE_ATTACHMENTS_UNSUPPORTED
 
 文本文件、PDF、压缩包、Office 文档等普通文件不会被转换成 Agent MCP resource。
 
+任何非文本 Chat Completions message content（包括 `image_url`）都会在进入 broker 前返回：
+
+```text
+AGENT_MEDIA_INPUT_UNSUPPORTED
+```
+
+`agent_exchange` 只输出 JSON request/result，不返回 MCP file、resource 或 image content。
+
 ChatGPT 对话里手动上传的图片/文件也**没有反向通道**自动进入本地 OpenAI-compatible 客户端。本地客户端需要什么数据，就通过自己的 messages/tools 流程提供。
 
 ## `agent_close`
 
 连续 Agent 任务真正结束时才调用 `agent_close()`。
 
-某次 `agent_exchange` 返回 `no_request` 很正常，不要因此关掉重开 bridge。
+某次 `agent_exchange` 返回 `no_request` 时不要因此关掉重开 bridge。它只表示该 wait window 内没有新的本地 OpenAI request，不表示任何本地命令仍在运行，也不单独构成再次等待的理由。只有另有已知 active process、外部条件或用户明确要求监控时才继续等待；连续两次 unchanged idle exchange 后，必须重新检查任务、真实进程状态和预期产物。
+
+本地进程 exit 或明确报告 PASS/FAIL 后，该 process session 就是终态；停止 poll，并推进下一项验证或收口步骤。
 
 bridge 被关闭后，在重新 `agent_open` 以前，本地新 request 没有可用的 Web GPT exchange 路径。
 

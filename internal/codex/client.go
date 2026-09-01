@@ -177,15 +177,6 @@ func (c *Client) RequestMCP(ctx context.Context, method string, params map[strin
 	return c.request(ctx, method, params, true)
 }
 
-func (c *Client) RequestInternal(ctx context.Context, method string, params map[string]any) (any, error) {
-	switch strings.TrimSpace(method) {
-	case "thread/start", "thread/unsubscribe":
-	default:
-		return nil, fmt.Errorf("CODEX_INTERNAL_METHOD_NOT_ALLOWED: %s", method)
-	}
-	return c.request(ctx, method, params, true)
-}
-
 func (c *Client) request(ctx context.Context, method string, params map[string]any, requireStarted bool) (any, error) {
 	if requireStarted && c.cmd == nil {
 		if err := c.Start(ctx); err != nil {

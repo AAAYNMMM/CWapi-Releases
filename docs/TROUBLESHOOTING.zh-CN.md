@@ -8,7 +8,7 @@
 
 **现象**
 
-Coding app 没有出现 `coding_open` / `coding_exec` / `coding_status` / `coding_attachment` / `coding_close`，或者 Agent app 没有出现 `agent_open` / `agent_exchange` / `agent_close`。
+Coding app 没有出现 `coding_open` / `coding_exec` / `coding_status` / `coding_close`，或者 Agent app 没有出现 `agent_open` / `agent_exchange` / `agent_close`。
 
 **可能原因**
 
@@ -131,7 +131,7 @@ portable 只复制了一部分、runtime 文件缺失，或者安全软件隔离
 
 **怎么修**
 
-把正式 `CWapi-v2.0.0.zip` 完整重新解压到一个干净、当前用户可写目录。不要随便拿另一个 Codex 安装去替换 bundled runtime。
+把正式 `CWapi-v2.0.2.zip` 完整重新解压到一个干净、当前用户可写目录。不要随便拿另一个 Codex 安装去替换 bundled runtime。
 
 ## private Git clone/fetch/push 失败
 
@@ -190,23 +190,19 @@ repository URL / target ref / expected commit 与现有 workspace metadata 不�
 
 用匹配参数 resume。真想从新 baseline 开始时，先保存重要本地工作，再通过 CWapi maintenance 重建 workspace。
 
-## `CODING_ATTACHMENT_IMAGE_ONLY`
+## 仍然出现旧的 `coding_attachment` 工具
 
 **现象**
 
-`coding_attachment` 拒绝某个 path。
+ChatGPT Coding app 显示 5 个工具，或仍列出 `coding_attachment`。
 
 **可能原因**
 
-至少一个文件不是受支持 raster image，或者超过图片限制。
-
-**检查什么**
-
-Coding 当前限制：最多 16 张、单张 32 MiB、单批 64 MiB、单边 4096 px，只支持 raster，SVG 不支持。
+当前连接的是旧版 server/catalog，而不是 CWapi 2.0.2 的 Coding route。
 
 **怎么修**
 
-`coding_attachment` 只传 workspace 中经过校验的 raster image。源码、Markdown、JSON、日志等文本用 `coding_exec` 读取。
+确认 CWapi 2.0.2 和 Coding Tunnel 正在运行，重新连接 Coding app，并核对准确的 4 工具 catalog。Coding MCP 已不再传输文件或图片。
 
 ## `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`
 
@@ -220,11 +216,25 @@ Coding 当前限制：最多 16 张、单张 32 MiB、单批 64 MiB、单边 409
 
 **检查什么**
 
-看客户端实际 request shape。Agent 的图片只支持标准 Chat Completions `image_url` data URI。
+看客户端实际 request shape。Agent 只接受文本与 tool JSON。
 
 **怎么修**
 
-去掉 generic file attachments。图片使用受支持的 inline `image_url`；文本/文件数据让本地软件通过自己的 messages/tools 工作流提供。
+去掉顶层 `attachments` 字段。上下文改用文本提供，或由本地软件自己的工具读取本地数据。
+
+## `AGENT_MEDIA_INPUT_UNSUPPORTED`
+
+**现象**
+
+本地 Agent 请求返回 `AGENT_MEDIA_INPUT_UNSUPPORTED`。
+
+**可能原因**
+
+Chat Completions message content 中存在非 `text` part，例如 `image_url`。
+
+**怎么修**
+
+只发送文本 message content 与 tool JSON。CWapi 不会通过 Agent MCP 入队或返回文件/图片 content。
 
 ## Agent Provider 401 `invalid_api_key`
 

@@ -28,7 +28,6 @@ portable 内置 Codex runtime **不是第二个 coding agent**。CWapi 只使用
 coding_open
 coding_exec
 coding_status
-coding_attachment
 coding_close
 ```
 
@@ -205,7 +204,7 @@ git show HEAD:path/to/file
 
 源码、Markdown、JSON、配置、日志和其它可读文本都通过 `coding_exec` 读取。
 
-**不要**用 `coding_attachment` 传文本。CWapi 2.0 已经明确不把普通文件转换成 MCP `EmbeddedResource`。
+Coding MCP 没有文件或图片传输工具，也不会产生 MCP `ImageContent` 或 `EmbeddedResource` content。
 
 大文件优先读取相关范围、带少量上下文的搜索命中或项目自己的 query，没必要把整个文件拖进对话，只因为字节很多看起来很努力。
 
@@ -297,39 +296,9 @@ private repository 的 clone/fetch/push 使用当前 Windows 用户已有的 Git
 
 认证失败时，检查当前 Windows 用户的 GitHub/Git credential，而不是去登录 Codex。GitHub token 也不要塞进 prompt 或仓库文件。
 
-## `coding_attachment`
+## 文件与图片
 
-只有 active repository workspace 里已经存在 raster image，而且 Web GPT 确实需要看图时才用。
-
-概念示例：
-
-```text
-coding_attachment(
-  repository_url="https://github.com/OWNER/REPO",
-  paths=["artifacts/result.png"]
-)
-```
-
-当前 Coding 图片限制：
-
-- 最多 16 张；
-- 单张最多 32 MiB；
-- 单批最多 64 MiB；
-- 图片单边最多 4096 px；
-- 支持经过校验的 PNG、JPEG、GIF、WebP 等 raster image；
-- SVG 不支持。
-
-只要请求中有一个不是受支持 raster image，就返回：
-
-```text
-CODING_ATTACHMENT_IMAGE_ONLY
-```
-
-### 为什么普通文件不走 attachment
-
-MCP 图片传输是经过明确约束和验证的窄通道。开放通用 text/binary file transfer 会扩大数据搬运面，而且普通源码工作根本不需要这么做。
-
-可读内容用 `coding_exec` 精确读取，通常比把整个文件盲目塞进 conversation 更安全，也更省往返。
+Coding MCP 不传输文件或图片。源码、Markdown、JSON、配置、日志等文本通过有界 `coding_exec` 精确读取；二进制文件和图片留在 workspace，不会被复制进 ChatGPT 对话。
 
 ## Close 与以后 resume
 

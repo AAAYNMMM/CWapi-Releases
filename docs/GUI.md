@@ -1,6 +1,6 @@
-# CWapi 2.0 GUI
+# CWapi 2.0.2 GUI
 
-窗口固定为 430 × 625、frameless、不可拉伸；标题栏 `×` 只隐藏主窗口到系统托盘，不终止 CWapi，真正退出由托盘菜单执行；single-instance 再次启动会唤醒已有窗口。主界面通过页签分为 Coding 与 Agent 两页，两个页面只显示并管理各自链路。
+窗口固定为 430 × 625、frameless、不可拉伸；主内容区支持鼠标滚轮纵向滚动；标题栏 `×` 只隐藏主窗口到系统托盘，不终止 CWapi，真正退出由托盘菜单执行；single-instance 再次启动会唤醒已有窗口。主界面通过页签分为 Coding 与 Agent 两页，两个页面只显示并管理各自链路。
 
 ## 页面结构
 
@@ -12,7 +12,7 @@ Coding | Agent
 当前错误码（仅失败时）
 ```
 
-- Coding 页：Coding Tunnel、Codex SAFE/FULL、active session 与 workspaces。
+- Coding 页：Coding Tunnel、Codex SAFE/FULL、独立的命令网络能力、active session 与 workspaces。
 - Agent 页：Agent Tunnel、enabled、Provider URL、API key、bridge Offline/Ready/Busy、pending/claimed/completed。
 - Tunnel 初始启动失败或异常退出后的自动退避重启显示为“正在重连”；断开或重配置会取消重启。
 - Tunnel ID 只在可编辑输入框中显示，不再额外渲染重复的“隧道 ID / 复制”行。
@@ -28,10 +28,11 @@ Coding 与 Agent 没有模式切换器，两条链可同时工作。页签切换
 GUI 可以：
 
 - SAFE/FULL 切换；
+- Coding 命令网络访问开关；
 - Agent enable/disable；
 - Agent API key regenerate；
 
-SAFE/FULL 是运行时 Codex access profile，可在 Coding session 保持打开时切换，不重启 Service，也不改变 active internal Coding session；已在执行的命令保持启动时的 sandbox，下一条 coding_exec 使用新 profile。其它需要重启 Service 的配置变更在 active Coding session 或 pending/claimed Agent request 存在时仍拒绝。
+SAFE/FULL 与 Coding network access 都是运行时能力，可在 Coding session 保持打开时切换，不重启 Service，也不改变 active internal Coding session；已在执行的命令保持启动时的 sandbox/network，下一条 coding_exec 使用新设置。网络默认关闭，FULL push 要求显式启用。其它需要重启 Service 的配置变更在 active Coding session 或 pending/claimed Agent request 存在时仍拒绝。
 
 ## Workspace maintenance
 

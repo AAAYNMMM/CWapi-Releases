@@ -31,7 +31,6 @@ The two lines are not drop-in compatible. See [Version Guide](VERSION_GUIDE.md) 
 coding_open
 coding_exec
 coding_status
-coding_attachment
 coding_close
 ```
 
@@ -147,52 +146,13 @@ If you copy only a clean `CWapi.exe`/`runtime` set into another directory, that 
 
 Before upgrading, close active sessions and back up important unpushed work.
 
-## Why can't I attach a normal source file with `coding_attachment`?
+## Can Coding MCP transfer files or images?
 
-Because `coding_attachment` is deliberately image-only.
+No. The formal Coding catalog contains only `coding_open`, `coding_exec`, `coding_status`, and `coding_close`. Source, Markdown, JSON, logs, and other text can be inspected with bounded `coding_exec` commands; Coding MCP emits neither `ImageContent` nor `EmbeddedResource`.
 
-Source, Markdown, JSON, logs, PDFs, archives, DOCX, and other ordinary files should be inspected through `coding_exec`. A non-image request returns:
+## Can Agent accept files or images?
 
-```text
-CODING_ATTACHMENT_IMAGE_ONLY
-```
-
-CWapi 2.0 does not expose ordinary files through MCP `EmbeddedResource`.
-
-## What images does Coding support?
-
-Current Coding limits:
-
-```text
-maximum images:       16
-maximum per image:    32 MiB
-maximum batch:        64 MiB
-maximum side length:  4096 px
-SVG:                  unsupported
-```
-
-Supported inputs are validated raster images such as PNG, JPEG, GIF, and WebP.
-
-## What images does Agent support?
-
-Agent accepts raster images only through standard Chat Completions message content using:
-
-```text
-type = image_url
-url  = data:...
-```
-
-Current Agent limits:
-
-```text
-maximum images:       8
-maximum per image:    8 MiB
-maximum batch:        16 MiB
-maximum side length:  2048 px
-SVG:                  unsupported
-```
-
-A generic top-level file `attachments` extension is not supported.
+No. Agent accepts text and tool JSON only. A top-level `attachments` field returns `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`; any non-text message content part, including `image_url`, returns `AGENT_MEDIA_INPUT_UNSUPPORTED` before broker admission.
 
 ## Does uploading a file to the ChatGPT conversation copy it into my local workspace/client?
 

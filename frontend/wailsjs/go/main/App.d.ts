@@ -13,3 +13,4 @@ export function RegenerateMCPIdentities():Promise<any>;
 export function RuntimeSnapshot():Promise<any>;
 export function SetAgentEnabled(arg1:boolean):Promise<any>;
 export function UpdateCodexAccessProfile(arg1:string):Promise<any>;
+export function UpdateCodexNetworkAccess(arg1:boolean):Promise<any>;

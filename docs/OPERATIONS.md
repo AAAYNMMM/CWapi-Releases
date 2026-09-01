@@ -4,7 +4,7 @@
 
 Extract the portable to any user-writable directory and run `CWapi.exe`. No Go, Node, Git or Wails installation is required. The first launch creates `CWapi-data/config/cwapi.json` and starts the loopback MCP listener plus the Agent Provider when enabled. Each bundled OpenAI Secure MCP Tunnel starts only after its own configuration is complete.
 
-Coding uses the bundled Codex app-server only for model-free `command/exec` and creates a private empty CODEX_HOME per command. No Codex login is needed. Private Git repositories still use the current Windows user's existing Git/GitHub credential setup.
+Coding uses the bundled Codex app-server only for model-free `command/exec` and creates a private empty CODEX_HOME per command. No Codex login is needed. SAFE does not inherit the current user's Git/GitHub credential setup; an authorized direct FULL push can use it only when Coding network access is explicitly enabled.
 
 ## Connect
 
@@ -42,22 +42,22 @@ Model:    cwapi-web-gpt
 
 ## Images and files
 
-CWapi 2.0 only transports raster images to Web GPT. It does not provide a general-purpose file transfer channel.
+CWapi 2.0.2 does not provide file or image transfer.
 
-For Coding, call `coding_attachment` only for repository-relative image paths such as PNG/JPEG/GIF/WebP. Any non-image path is rejected with `CODING_ATTACHMENT_IMAGE_ONLY`. Source, Markdown, JSON, logs and other readable text should be inspected through `coding_exec`; PDF, ZIP, DOCX and other ordinary files are not instantiated as ChatGPT MCP file resources.
+For Coding, read source, Markdown, JSON, logs and other inspectable text through bounded `coding_exec`; there is no attachment tool.
 
-For Agent, local software may send a standard Chat Completions `image_url` data URI. CWapi validates and temporarily stores the raster image, removes the raw bytes from broker JSON, and returns native MCP `ImageContent` through `agent_exchange`. A top-level generic `attachments` file array is rejected with `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`.
+For Agent, top-level `attachments` requests return `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`, while non-text message content parts such as `image_url` return `AGENT_MEDIA_INPUT_UNSUPPORTED`. `agent_exchange` carries request JSON only and emits no MCP file/image content.
 
-The direction remains local-to-Web-GPT only. A file or image uploaded in the ChatGPT conversation is not written into the local workspace or Agent software.
+For long Agent workflows, local software may add bounded top-level `metadata` strings such as `task_id` and `correlation_id`. These are surfaced on each MCP request and remain separate from the random OpenAI `request_id` and any local command session. Web GPT should read exchange `activity` for broker truth. `no_request` means only that no new OpenAI request arrived during the wait window; inspect the actual local process/artifact before waiting again.
 
-Coding image limits remain 16 images, 32 MiB each, 64 MiB total and 4096 px per image side. Agent image limits are 8 images, 8 MiB each, 16 MiB total and 2048 px per image side. SVG is unsupported. Agent temporary images are removed automatically on every terminal request path, broker shutdown and the next startup.
+A file or image uploaded in the ChatGPT conversation is never written into the local workspace or Agent software.
 
 ## Access profile
 
-- SAFE: ordinary source inspection, edits and tests；
-- FULL: authorized operations that need `.git` writes or broader host access。
+- SAFE: ordinary source inspection, edits and tests under `workspaceWrite`, isolated caches/profile/Git configuration and the independently selected network capability；
+- FULL: every command that passes CWapi permanent policy runs with `dangerFullAccess` and the current Windows user profile/AppData environment. Permanent destructive-Git, credential and forbidden-tool rules still apply; direct `git push` additionally requires network access and is the only path that restores host Git config/credential-helper discovery。
 
-SAFE/FULL may be switched while Coding sessions remain open. An already running coding_exec keeps the sandbox selected when that command started; the next coding_exec uses the newly selected profile. Other service-restart configuration mutations remain blocked while Coding work is active.
+SAFE/FULL and Coding network access may be switched while Coding sessions remain open. An already running coding_exec keeps the sandbox/network selected when that command started; the next coding_exec uses the new settings. FULL push requires network access. Other service-restart configuration mutations remain blocked while Coding work is active.
 
 ## Workspace recovery
 
@@ -78,10 +78,12 @@ Before replacing a version, close active sessions and back up any unpushed works
 - OpenAI Tunnel blocked: confirm Tunnel ID and Runtime API key; verify the bundled tunnel-client is present in `runtime/tunnel/current`；
 - OpenAI Tunnel failed after automatic retries: inspect the GUI state and reconnect; do not put the Runtime API key into `cwapi.json` or an environment file；
 - Codex unavailable: verify the bundled runtime lock/hash and Windows sandbox readiness；
-- private clone/push fails: verify current-user GitHub credentials；
-- `CODING_ATTACHMENT_IMAGE_ONLY`: the requested Coding attachment is not a supported raster image; read text with `coding_exec` instead；
-- `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`: local Agent software attempted generic file transfer; only inline raster images are supported；
+- private clone fails: verify the CWapi workspace manager's current-user GitHub credentials；
+- FULL push fails with `CODING_NETWORK_ACCESS_REQUIRED`: enable Coding network access explicitly, then retry the direct `git push`；
+- `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`: local Agent software attempted file transfer; file transfer is disabled；
+- `AGENT_MEDIA_INPUT_UNSUPPORTED`: local Agent software attempted image or other non-text message content; media transfer is disabled；
 - Agent 503: open Agent MCP bridge；
 - Agent 429: wait for pending/claimed work to finish；
 - Agent 504: Web GPT did not answer before request timeout；
+- repeated Agent `no_request`: check `activity.changed/idle_count`; do not infer a running command, and after two unchanged waits re-check the local process and expected artifacts；
 - config mutation rejected: close active Coding/Agent work first。

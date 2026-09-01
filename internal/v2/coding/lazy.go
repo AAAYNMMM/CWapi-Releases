@@ -58,6 +58,22 @@ func NewLazy(manager *workspace.Manager, dataRoot string, cfg v2config.CodexConf
 		currentConfig = candidate
 		return nil
 	}
+	setNetworkAccess := func(allowed bool) error {
+		hostMu.Lock()
+		defer hostMu.Unlock()
+		candidate := currentConfig
+		candidate.NetworkAccess = allowed
+		if err := v2config.ValidateCodex(candidate); err != nil {
+			return err
+		}
+		if host != nil {
+			if err := host.SetNetworkAccess(allowed); err != nil {
+				return err
+			}
+		}
+		currentConfig = candidate
+		return nil
+	}
 	execute := func(ctx context.Context, path string, input codextoolhost.ExecInput) (codextoolhost.ExecResult, error) {
 		current, err := resolve()
 		if err != nil {
@@ -73,5 +89,6 @@ func NewLazy(manager *workspace.Manager, dataRoot string, cfg v2config.CodexConf
 		return nil, err
 	}
 	service.setAccessProfile = setAccessProfile
+	service.setNetworkAccess = setNetworkAccess
 	return service, nil
 }

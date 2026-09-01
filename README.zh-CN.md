@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-[![Release](https://img.shields.io/github/v/release/AAAYNMMM/chatgpt-work-api-Releases?filter=v2.0.0&style=flat-square&label=Release)](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/tag/v2.0.0)
+[![Release](https://img.shields.io/github/v/release/AAAYNMMM/chatgpt-work-api-Releases?filter=v2.0.2&style=flat-square&label=Release)](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/tag/v2.0.2)
 ![Windows](https://img.shields.io/badge/Windows-11%20x64-0078d4?style=flat-square)
 ![MCP](https://img.shields.io/badge/MCP-Coding%20%2B%20Agent-6f42c1?style=flat-square)
 ![OpenAI compatible](https://img.shields.io/badge/API-OpenAI--compatible-10a37f?style=flat-square)
@@ -14,7 +14,7 @@ CWapi 2.0 提供两条彼此隔离的链路：
 - **Coding**：ChatGPT Web 通过 MCP 操作本地 Git workspace，读取、修改、编译、测试和执行开发命令。
 - **Agent**：CWapi 在 localhost 提供 OpenAI-compatible API，本地软件把模型请求交给 Web GPT，再取得回答或 `tool_calls`。
 
-当前正式版本：**`2.0.0`**。
+当前正式版本：**`2.0.2`**。
 
 ## CWapi 是什么？
 
@@ -32,13 +32,12 @@ CWapi Coding MCP
 Build / Test / Git / Development Tools
 ```
 
-Coding 对外只有 5 个工具：
+Coding 对外只有 4 个工具：
 
 ```text
 coding_open
 coding_exec
 coding_status
-coding_attachment
 coding_close
 ```
 
@@ -83,7 +82,7 @@ Cline、Roo Code 等允许自定义 OpenAI-compatible provider 的客户端**可
 - 普通开发保持 `SAFE`，只有用户明确授权、需要 `.git` metadata 写入或更高本机权限时再切 `FULL`。
 - 给本地 OpenAI-compatible 软件提供一个由 Web GPT 驱动的 localhost 模型入口。
 - Coding 与 Agent 真正隔离：不同 MCP token、不同 tool catalog、不同 Tunnel 配置和 runtime path。
-- 普通文件不混进 MCP attachment；只传经过校验的 raster image。
+- Coding 与 Agent 均关闭文件/图片传输；需要检查的 repository 文本通过有界 `coding_exec` 命令读取。
 
 ## 版本怎么选？
 
@@ -106,7 +105,7 @@ Cline、Roo Code 等允许自定义 OpenAI-compatible provider 的客户端**可
 - 运行编译器、测试、脚本、localhost 服务和 Git 命令。
 - `coding_status` 查看 HEAD、tracking HEAD、dirty 与 divergence。
 - 新 ChatGPT 对话通过兼容的 `coding_open(..., resume=true)` 继续同一 active repository。
-- `coding_attachment` 把受支持的 workspace raster image 返回 Web GPT。
+- 源码和其它可检查文本保持在命令链路中；Coding 不提供文件或图片传输工具。
 
 ### Agent
 
@@ -115,16 +114,19 @@ Cline、Roo Code 等允许自定义 OpenAI-compatible provider 的客户端**可
 - function/tool call 返回本地客户端执行，不由 Agent GPT 擅自执行第三方软件的本地工具。
 - 多个独立请求用准确 `request_id` 关联。
 - 有界 queue 与 request timeout。
-- 标准 Chat Completions `image_url` data URI inline raster image。
+- exchange 返回单调 revision、queue counts、idle 次数、等待时长与 next-action 等结构化 activity。
+- 非 tool-call 终态以 `state=responses` 确认；`no_request` 只表示真实 bounded wait 内没有新 OpenAI request。
+- 原生 JSON tool arguments/content 会规范化为 OpenAI-compatible string。
+- 只接受文本和 tool JSON；顶层附件及非文本 message content 会在进入 broker 前拒绝。
 - 独立 Agent MCP bridge 与独立 Secure MCP Tunnel 配置。
 
 ## 5 分钟快速开始
 
-1. 下载 [`CWapi-v2.0.0.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.0/CWapi-v2.0.0.zip)。
+1. 下载 [`CWapi-v2.0.2.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.2/CWapi-v2.0.2.zip)。
 2. 完整解压到当前用户可写目录，运行 `CWapi.exe`。
 3. 要使用 **Coding**，先创建 OpenAI Secure MCP Tunnel，取得 Tunnel ID 与 Runtime API key，再填入 CWapi 的 Coding Tunnel 面板。
 4. 在 ChatGPT 使用支持你所需 MCP 能力的计划/Workspace，按当前 Developer Mode / custom app 流程连接同一个 Tunnel。ChatGPT 不能直接访问 CWapi 的 `127.0.0.1` MCP 地址。
-5. 确认 5 个 Coding 工具出现，再用 `coding_open` + `coding_status` 或只读 `coding_exec` 做第一次仓库测试。
+5. 确认 4 个 Coding 工具出现，再用 `coding_open` + `coding_status` 或只读 `coding_exec` 做第一次仓库测试。
 6. 要使用 **Agent**，再创建第二个独立 Secure MCP Tunnel，填入 Agent Tunnel 面板，并在 ChatGPT 把它作为另一个 MCP app 连接。
 7. 在 Agent 对话中调用 `agent_open`，连续任务期间持续使用 `agent_exchange`。
 8. 本地 OpenAI-compatible 软件填写上面的 Base URL、model 和 GUI 给出的 Agent API key。
@@ -145,11 +147,11 @@ Cline、Roo Code 等允许自定义 OpenAI-compatible provider 的客户端**可
 
 整体移动解压目录时，旁边的 `CWapi-data` 会一起移动；只移动干净程序/runtime 到新位置，则新位置会创建新的 data root。
 
-## 图片与普通文件
+## 文件与图片
 
-`coding_attachment` 只支持 raster image，并以原生 MCP `ImageContent` 返回。源码、Markdown、JSON、日志、PDF、压缩包、DOCX 等普通文件不是通用 MCP attachment。可读取文本直接用 `coding_exec`。
+CWapi 2.0.2 的 Coding 与 Agent MCP 都不传输文件或图片。源码、Markdown、JSON、日志等可检查 repository 文本通过有界 `coding_exec` 命令读取。
 
-Agent 也是同一原则：本地客户端可以通过 `image_url` data URI 发送有界 inline raster image；顶层 generic `attachments` 会返回 `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`。
+Agent 只接受文本与 tool JSON。顶层 `attachments` 返回 `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`；`image_url` 等非文本 message content 返回 `AGENT_MEDIA_INPUT_UNSUPPORTED`。
 
 用户上传到 ChatGPT 对话里的文件不会自动写入 Coding workspace，也不会自动进入 Agent 本地软件。
 
@@ -193,15 +195,15 @@ CWapi 不建立持久化完整对话 transcript，也不保存完整 command-out
 
 ## 发行路线
 
-- [`main`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/main)：CWapi 2.x，当前正式版本 `2.0.0`。
+- [`main`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/main)：CWapi 2.x，当前正式版本 `2.0.2`。
 - [`1.6.x`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/1.6.x)：CWapi 1.6.x 旧版路线，当前正式版本 `1.6.3`。
 
 ## 开发仓库与发行仓库
 
 当前仓库只放面向发行的干净源码快照、portable Release 和用户文档。完整开发历史、测试、验证/打包自动化和发行工程位于 [`AAAYNMMM/CWapi`](https://github.com/AAAYNMMM/CWapi)。
 
-CWapi 2.0.0 对应开发源码 commit：
+CWapi 2.0.2 对应开发源码 commit：
 
 ```text
-d904ae80428c90717e050a151c65fa35b6b83c63
+05068c482a617c6beb2acd5c6d2ff15cfedc7598
 ```

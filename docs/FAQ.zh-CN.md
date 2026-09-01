@@ -31,7 +31,6 @@ CWapi 本身不运行语言模型。
 coding_open
 coding_exec
 coding_status
-coding_attachment
 coding_close
 ```
 
@@ -154,52 +153,13 @@ CODING_WORKSPACE_BUSY
 
 升级前最好先关闭 active session，并备份重要但还没 push 的修改。
 
-## 为什么普通源码文件不能用 `coding_attachment`？
+## Coding MCP 能传文件或图片吗？
 
-因为 `coding_attachment` 明确只支持图片。
+不能。正式 Coding catalog 只有 `coding_open`、`coding_exec`、`coding_status`、`coding_close`。源码、Markdown、JSON、日志等文本可用有界 `coding_exec` 读取；Coding MCP 不产生 `ImageContent` 或 `EmbeddedResource`。
 
-源码、Markdown、JSON、日志、PDF、ZIP、DOCX 等普通文件通过 `coding_exec` 读取。非图片会返回：
+## Agent 能接收文件或图片吗？
 
-```text
-CODING_ATTACHMENT_IMAGE_ONLY
-```
-
-CWapi 2.0 不再把普通文件包装成 MCP `EmbeddedResource`。
-
-## Coding 支持哪些图片？
-
-当前限制：
-
-```text
-最多：            16 张
-单张最大：        32 MiB
-单批最大：        64 MiB
-单边最大：        4096 px
-SVG：             不支持
-```
-
-接受经过校验的 raster image，例如 PNG、JPEG、GIF、WebP。
-
-## Agent 支持哪些图片？
-
-Agent 只接受标准 Chat Completions message content 里的：
-
-```text
-type = image_url
-url  = data:...
-```
-
-当前限制：
-
-```text
-最多：            8 张
-单张最大：        8 MiB
-单批最大：        16 MiB
-单边最大：        2048 px
-SVG：             不支持
-```
-
-generic top-level `attachments` 不支持。
+不能。Agent 只接受文本与 tool JSON。顶层 `attachments` 返回 `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`；`image_url` 等任何非文本 message content part 都会在进入 broker 前返回 `AGENT_MEDIA_INPUT_UNSUPPORTED`。
 
 ## 在 ChatGPT 对话里上传文件，会自动进入本地 workspace 或 Agent 客户端吗？
 

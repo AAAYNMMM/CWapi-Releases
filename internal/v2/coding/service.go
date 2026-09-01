@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"github.com/AAAYNMMM/CWapi/internal/repository"
-	"github.com/AAAYNMMM/CWapi/internal/v2/attachments"
 	"github.com/AAAYNMMM/CWapi/internal/v2/codextoolhost"
 	"github.com/AAAYNMMM/CWapi/internal/v2/mcpserver"
 	"github.com/AAAYNMMM/CWapi/internal/v2/workspace"
@@ -20,7 +19,6 @@ const openingRepository = "<opening>"
 type prepareFunc func(context.Context, workspace.PrepareInput) (workspace.Result, error)
 type inspectFunc func(context.Context, string) (workspace.Snapshot, error)
 type execFunc func(context.Context, string, codextoolhost.ExecInput) (codextoolhost.ExecResult, error)
-type attachmentFunc func(context.Context, string, []string, attachments.Policy) (attachments.Batch, error)
 type readyFunc func() error
 
 type Service struct {
@@ -29,9 +27,9 @@ type Service struct {
 	prepare          prepareFunc
 	inspect          inspectFunc
 	execute          execFunc
-	loadAttachments  attachmentFunc
 	ready            readyFunc
 	setAccessProfile func(string) error
+	setNetworkAccess func(bool) error
 	sessions         map[string]*record
 	active           map[string]string
 	opening          map[string]*openingRecord
@@ -78,6 +76,7 @@ func New(manager *workspace.Manager, host *codextoolhost.Host) (*Service, error)
 		return nil, err
 	}
 	service.setAccessProfile = host.SetAccessProfile
+	service.setNetworkAccess = host.SetNetworkAccess
 	return service, nil
 }
 
@@ -90,7 +89,7 @@ func newService(prepare prepareFunc, execute execFunc, inspect inspectFunc, read
 		ready = readiness[0]
 	}
 	return &Service{
-		prepare: prepare, inspect: inspect, execute: execute, loadAttachments: attachments.LoadWorkspace, ready: ready,
+		prepare: prepare, inspect: inspect, execute: execute, ready: ready,
 		sessions: make(map[string]*record), active: make(map[string]string), opening: make(map[string]*openingRecord),
 	}, nil
 }
@@ -110,6 +109,23 @@ func (s *Service) SetAccessProfile(profile string) error {
 		return errors.New("CODING_ACCESS_PROFILE_UNAVAILABLE")
 	}
 	return setter(profile)
+}
+
+func (s *Service) SetNetworkAccess(allowed bool) error {
+	if s == nil {
+		return errors.New("CODING_SERVICE_UNAVAILABLE")
+	}
+	s.mu.RLock()
+	closed := s.closed
+	setter := s.setNetworkAccess
+	s.mu.RUnlock()
+	if closed {
+		return errors.New("CODING_SERVICE_CLOSED")
+	}
+	if setter == nil {
+		return errors.New("CODING_NETWORK_ACCESS_UNAVAILABLE")
+	}
+	return setter(allowed)
 }
 
 func (s *Service) Open(ctx context.Context, input mcpserver.CodingOpenInput) (mcpserver.CodingOpenOutput, error) {
@@ -262,33 +278,6 @@ func (s *Service) Exec(ctx context.Context, input mcpserver.CodingExecInput) (mc
 	return mcpserver.CodingExecOutput{
 		State: result.State, ExitCode: result.ExitCode,
 		Stdout: result.Stdout, Stderr: result.Stderr, Truncated: result.Truncated,
-	}, nil
-}
-func (s *Service) Attachment(ctx context.Context, input mcpserver.CodingAttachmentInput) (mcpserver.CodingAttachmentOutput, error) {
-	_, record, err := s.lookupRepository(input.RepositoryURL)
-	if err != nil {
-		return mcpserver.CodingAttachmentOutput{}, err
-	}
-	attachmentCtx, finish, err := record.beginOperation(ctx)
-	if err != nil {
-		return mcpserver.CodingAttachmentOutput{}, err
-	}
-	defer finish()
-	loader := s.loadAttachments
-	if loader == nil {
-		return mcpserver.CodingAttachmentOutput{}, errors.New("CODING_ATTACHMENT_READER_UNAVAILABLE")
-	}
-	batch, err := loader(attachmentCtx, record.path, input.Paths, attachments.CodingPolicy())
-	if err != nil {
-		return mcpserver.CodingAttachmentOutput{}, err
-	}
-	metadata := make([]attachments.Metadata, 0, len(batch.Items))
-	for _, item := range batch.Items {
-		metadata = append(metadata, item.Metadata)
-	}
-	return mcpserver.CodingAttachmentOutput{
-		Repository: record.repository, State: "completed", TotalBytes: batch.TotalBytes,
-		Attachments: metadata, ContentItems: batch.Items,
 	}, nil
 }
 func (r *record) beginOperation(ctx context.Context) (context.Context, func(), error) {

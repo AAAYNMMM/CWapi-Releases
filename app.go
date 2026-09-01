@@ -64,7 +64,7 @@ func (a *App) startup(ctx context.Context) {
 	a.startupErr = err
 	a.mu.Unlock()
 	if err != nil {
-		fmt.Println("CWapi 2.0 startup degraded:", err.Error())
+		fmt.Println("CWapi 2.0.2 startup degraded:", err.Error())
 	}
 
 	a.tray = tray.New(a.showMainWindow, a.requestShutdown)
@@ -296,6 +296,16 @@ func (a *App) UpdateCodexAccessProfile(profile string) (v2service.Snapshot, erro
 		return a.RuntimeSnapshot(), err
 	}
 	return current.UpdateCodexAccessProfile(profile)
+}
+
+func (a *App) UpdateCodexNetworkAccess(allowed bool) (v2service.Snapshot, error) {
+	a.reconfigureMu.Lock()
+	defer a.reconfigureMu.Unlock()
+	current, err := a.core()
+	if err != nil {
+		return a.RuntimeSnapshot(), err
+	}
+	return current.UpdateCodexNetworkAccess(allowed)
 }
 
 func (a *App) SetAgentEnabled(enabled bool) (v2service.Snapshot, error) {

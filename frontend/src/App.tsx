@@ -11,6 +11,7 @@ import {
   RuntimeSnapshot,
   SetAgentEnabled,
   UpdateCodexAccessProfile,
+  UpdateCodexNetworkAccess,
 } from "../wailsjs/go/main/App";
 import { WindowHide } from "../wailsjs/runtime/runtime";
 
@@ -19,12 +20,13 @@ type Snapshot = {
   state: string;
   mcp?: { state?: string; address?: string; error?: string };
   codex_access_profile?: string;
+  codex_network_access?: boolean;
   codex?: { state?: string; executable?: string; last_error?: string };
   coding?: { state?: string; active?: number; repositories?: string[] };
   workspaces?: { repository_count?: number; repositories?: string[]; invalid_entries?: number };
   agent_enabled?: boolean;
   agent_provider?: { state?: string; address?: string; last_error?: string };
-  agent?: { bridge_state?: string; pending?: number; claimed?: number; completed?: number; last_state?: string; last_error?: string };
+  agent?: { bridge_state?: string; pending?: number; claimed?: number; active?: number; completed?: number; revision?: number; idle_count?: number; last_state?: string; last_error?: string };
   openai_tunnel?: TunnelSnapshot;
   agent_openai_tunnel?: TunnelSnapshot;
   last_error?: string;
@@ -267,7 +269,7 @@ export default function App() {
       <header className="titlebar">
         <div className="brand-row">
           <div className="logo">CW</div>
-          <div><strong>CWapi</strong><span>2.0</span></div>
+          <div><strong>CWapi</strong><span>2.0.2</span></div>
         </div>
         <button className="window-button" onClick={WindowHide} aria-label="缩小到托盘" title="缩小到托盘">×</button>
       </header>
@@ -287,11 +289,13 @@ export default function App() {
             working={working}
             workspaces={workspaces}
             access={access}
+            networkAccess={Boolean(snapshot.codex_network_access)}
             onTunnelIDChange={setCodingTunnelID}
             onTunnelKeyChange={setCodingTunnelKey}
             onConfigureTunnel={configureCodingTunnel}
             onClearTunnel={clearCodingTunnel}
             onAccessChange={(next) => void action(() => UpdateCodexAccessProfile(next), next === "safe" ? "Codex 已切换为安全模式" : "Codex 已切换为完整模式")}
+            onNetworkAccessChange={(allowed) => void action(() => UpdateCodexNetworkAccess(allowed), allowed ? "Coding 网络访问已启用" : "Coding 网络访问已禁用")}
             onOpenWorkspaceManager={() => setWorkspaceManagerOpen(true)}
           />
         ) : (
@@ -344,7 +348,7 @@ function PageTab({ page, activePage, label, detail, status, onSelect }: { page: 
   );
 }
 
-function CodingPage({ snapshot, tunnel, tunnelID, tunnelKey, working, workspaces, access, onTunnelIDChange, onTunnelKeyChange, onConfigureTunnel, onClearTunnel, onAccessChange, onOpenWorkspaceManager }: {
+function CodingPage({ snapshot, tunnel, tunnelID, tunnelKey, working, workspaces, access, networkAccess, onTunnelIDChange, onTunnelKeyChange, onConfigureTunnel, onClearTunnel, onAccessChange, onNetworkAccessChange, onOpenWorkspaceManager }: {
   snapshot: Snapshot;
   tunnel: TunnelInfo;
   tunnelID: string;
@@ -352,11 +356,13 @@ function CodingPage({ snapshot, tunnel, tunnelID, tunnelKey, working, workspaces
   working: boolean;
   workspaces: string[];
   access: string;
+  networkAccess: boolean;
   onTunnelIDChange: (value: string) => void;
   onTunnelKeyChange: (value: string) => void;
   onConfigureTunnel: () => Promise<void>;
   onClearTunnel: () => void;
   onAccessChange: (value: string) => void;
+  onNetworkAccessChange: (allowed: boolean) => void;
   onOpenWorkspaceManager: () => void;
 }) {
   return (
@@ -368,6 +374,7 @@ function CodingPage({ snapshot, tunnel, tunnelID, tunnelKey, working, workspaces
           <button disabled={working} className={access === "safe" ? "selected" : ""} onClick={() => onAccessChange("safe")}>安全 SAFE</button>
           <button disabled={working} className={access === "full" ? "selected danger" : ""} onClick={() => onAccessChange("full")}>完整 FULL</button>
         </div>
+        <div className="card-title"><span>命令网络访问</span><label className="switch"><input type="checkbox" aria-label="允许 Coding 命令访问网络" checked={networkAccess} disabled={working} onChange={(event) => onNetworkAccessChange(event.target.checked)} /><span /></label></div>
         <StatRow label="活动会话" value={snapshot.coding?.active ?? 0} />
         <StatRow label="工作区仓库" value={snapshot.workspaces?.repository_count ?? 0} />
         {(snapshot.coding?.repositories || []).slice(0, 2).map((repo) => <div className="repo" key={repo}>{repo}</div>)}

@@ -7,7 +7,8 @@ CWapi uses the bundled official `codex.exe app-server` only as a model-free deve
 ```text
 Web GPT
   -> Coding MCP coding_exec
-  -> CWapi exact argv + repository CWD validation
+  -> CWapi final executable/argv/CWD resolution
+  -> permanent executionpolicy.Check
   -> private codex.exe app-server
   -> command/exec
   -> Codex code-mode host / Windows sandbox
@@ -18,7 +19,7 @@ Web GPT
 
 ## Account isolation
 
-Each command gets a new `CWapi-data/temp/codex-executions/<process-id>` CODEX_HOME containing only CWapi's execution config and permanent rules. The app-server environment removes OpenAI/Codex API keys, does not read the current user's `~/.codex`, and deletes the execution home when the command ends.
+Each command gets a new `CWapi-data/temp/codex-executions/<process-id>` CODEX_HOME containing only CWapi's execution config and defense-in-depth rules. The app-server environment removes OpenAI/Codex API keys, does not read the current user's `~/.codex`, and deletes the execution home when the command ends.
 
 CWapi calls only app-server initialization, Windows sandbox readiness/setup, and `command/exec`. No `thread/start`, `turn/start`, auth, account, model, history or rate-limit method is used by the 2.0 Coding path.
 
@@ -36,11 +37,11 @@ The remote command and CWD use forward-slash syntax and are resolved to a real e
 ## Sandbox mapping
 
 ```text
-safe -> command/exec workspaceWrite
-full -> command/exec dangerFullAccess
+safe command                       -> command/exec workspaceWrite
+full, every permitted command      -> command/exec dangerFullAccess
 ```
 
-SAFE supports source read/edit/test while Codex protects `.git`. FULL is required for authorized commit/push. Both profiles still use the private empty CODEX_HOME and never enable a Codex account.
+CWapi checks the resolved top-level target before `StartCommand`; permanent denials are profile-independent. Runtime roots are physically confined beneath the workspace before host-side Temp/cache creation. SAFE commands receive workspace-local Temp/cache/profile directories, isolated Git configuration and default-off network access. FULL sends every permanently permitted command through `dangerFullAccess` and restores the current Windows user profile/AppData environment. Guarded Git metadata operations still require the trusted bounded-PATH Git and argument validation. Direct FULL push additionally requires the independent network capability, rejects force/delete/custom receive-pack/local transports, limits Git transport to HTTPS/SSH, and is the only path that restores host Git configuration/credential-helper discovery. Both profiles use the private empty CODEX_HOME and never enable a Codex account.
 
 ## Runtime integrity
 

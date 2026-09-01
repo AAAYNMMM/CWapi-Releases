@@ -15,3 +15,4 @@ export function RegenerateMCPIdentities() { return window['go']['main']['App']['
 export function RuntimeSnapshot() { return window['go']['main']['App']['RuntimeSnapshot'](); }
 export function SetAgentEnabled(arg1) { return window['go']['main']['App']['SetAgentEnabled'](arg1); }
 export function UpdateCodexAccessProfile(arg1) { return window['go']['main']['App']['UpdateCodexAccessProfile'](arg1); }
+export function UpdateCodexNetworkAccess(arg1) { return window['go']['main']['App']['UpdateCodexNetworkAccess'](arg1); }

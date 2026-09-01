@@ -1,5 +1,32 @@
 ﻿# Changelog
 
+## 2.0.2 — 2026-09-01
+
+2.0.2 集中修复长任务中的状态推进、MCP 交互和防空转行为：
+
+- 明确 Web GPT 是唯一任务控制器；CWapi 只维护 bridge/OpenAI request 状态，本地软件只执行工具；
+- `agent_exchange` 对不含 tool call 的终态 response 以 `state=responses` 立即确认；含 `tool_calls` 时在同一 exchange 内继续 bounded wait，以便直接领取 tool-result follow-up request；
+- `no_request` 只由真实 wait timeout 产生，仅表示等待窗口内没有新的本地 OpenAI request，不能用于推断本地 command 正在运行；
+- exchange 增加 revision、changed、pending、inflight、active、idle count、wait time、last state/error 与 next action 等结构化 `activity`；
+- request 交付增加 timing/state 信息，并支持可选 `metadata.task_id` / `metadata.correlation_id`；`request_id` 明确不是第三方 command session；
+- assistant function arguments 与 JSON content 支持原生 JSON 输入并规范化，语义相同的 native/string tool arguments 使用 canonical fingerprint 保持幂等；
+- Coding 正式 catalog 固定为 `coding_open`、`coding_exec`、`coding_status`、`coding_close`；Coding/Agent 都不提供文件或图片传输；
+- 产品、配置、前端和 portable/candidate manifest 版本统一为 `2.0.2`。
+
+发行包对应开发仓库源码提交：
+
+```text
+05068c482a617c6beb2acd5c6d2ff15cfedc7598
+```
+
+## 2.0.1 — 2026-09-01
+
+- 收紧 Coding 永久执行策略，使 resolver 后的最终 executable/argv/CWD 在进程启动前再次校验；
+- FULL 对通过永久策略的命令使用 `dangerFullAccess`，SAFE 继续使用隔离的 `workspaceWrite`；两种 profile 都不绕过破坏性 Git、凭据读取、禁止系统工具和 protected-path 规则；
+- 修复 Windows SAFE 下 Go、npm、Vite/Vitest 的 Temp/cache/profile 与子进程兼容性；
+- 移除 Coding/Agent 文件和图片传输，删除 `coding_attachment`、Agent inline media/attachment 临时存储与 MCP file/image content 输出；
+- 增加 Windows CI 和相关 execution policy、MCP、前端 regression。
+
 ## 2.0.0 — 2026-08-31
 
 CWapi 2.0 正式成为发行主线。

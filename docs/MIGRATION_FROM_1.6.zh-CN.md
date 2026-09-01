@@ -35,7 +35,7 @@ CWapi 2.0 Agent
 
 ```text
 C:\Tools\CWapi-1.6.3\...
-C:\Tools\CWapi-2.0.0\...
+C:\Tools\CWapi-2.0.2\...
 ```
 
 两个解压目录各自带自己的 data root，可以并存。先把 2.0 跑通，再考虑是否归档旧目录。
@@ -75,7 +75,6 @@ CWapi 2.0 的 Coding 和 Agent 都不使用 Slack。
 coding_open
 coding_exec
 coding_status
-coding_attachment
 coding_close
 ```
 
@@ -162,10 +161,10 @@ CWapi/2.0/OpenAI/Tunnel/Agent/APIKey
 
 1. **先收尾或保护 1.6.3 里的重要工作。** 该 commit/push 的先做完，不能丢的本地内容另做备份。
 2. **保留原来的 1.6.3 目录。** 暂时不要改动这套已经能工作的环境。
-3. **把 2.0.0 完整解压到另一个目录。** 下载：[`CWapi-v2.0.0.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.0/CWapi-v2.0.0.zip)。
+3. **把 2.0.2 完整解压到另一个目录。** 下载：[`CWapi-v2.0.2.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.2/CWapi-v2.0.2.zip)。
 4. **先运行一次 2.0。** 让它生成自己的 `CWapi-data` 和 v3 config。
 5. **需要 Coding 就重新配置 Coding Tunnel。** 新建 Secure MCP Tunnel，通过 Coding 面板保存 Tunnel ID / Runtime API key。
-6. **在 ChatGPT 连接 Coding app。** 确认准确出现 5 个 `coding_*` tools。
+6. **在 ChatGPT 连接 Coding app。** 确认准确出现 4 个 `coding_*` tools。
 7. **先用测试仓库验证只读 Coding。** 再验证 SAFE 下的普通 edit/build/test。
 8. **需要 Agent 再单独配置。** 建第二条 Agent Tunnel，连接 Agent MCP app，本地客户端填写 CWapi 的 Base URL / model / Agent API key。
 9. **用真实工作流验证一遍。** 不要因为 GUI 能打开就宣布迁移成功，人类软件史上已经有太多这种乐观主义。

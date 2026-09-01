@@ -8,7 +8,7 @@ Use this guide from the symptom you can actually see. Check [Getting Started](GE
 
 **Symptom**
 
-The Coding app does not expose `coding_open` / `coding_exec` / `coding_status` / `coding_attachment` / `coding_close`, or the Agent app does not expose `agent_open` / `agent_exchange` / `agent_close`.
+The Coding app does not expose `coding_open` / `coding_exec` / `coding_status` / `coding_close`, or the Agent app does not expose `agent_open` / `agent_exchange` / `agent_close`.
 
 **Likely cause**
 
@@ -137,7 +137,7 @@ The portable was only partially copied/extracted, runtime files were removed, or
 
 **How to fix**
 
-Re-extract the complete official `CWapi-v2.0.0.zip` into a clean user-writable directory. Do not replace the bundled runtime with an arbitrary Codex installation.
+Re-extract the complete official `CWapi-v2.0.2.zip` into a clean user-writable directory. Do not replace the bundled runtime with an arbitrary Codex installation.
 
 ## Private Git clone/fetch/push fails
 
@@ -196,23 +196,19 @@ The repository URL/target ref/expected commit is incompatible with the existing 
 
 Resume using matching parameters. If you intentionally want a new baseline, first preserve any important local work, then rebuild the workspace through CWapi's maintenance flow rather than deleting files blindly.
 
-## `CODING_ATTACHMENT_IMAGE_ONLY`
+## An old `coding_attachment` tool still appears
 
 **Symptom**
 
-`coding_attachment` rejects a requested path.
+The ChatGPT Coding app shows five tools or still lists `coding_attachment`.
 
 **Likely cause**
 
-At least one requested item is not a supported raster image or violates image limits.
-
-**What to check**
-
-Coding limits are 16 images, 32 MiB each, 64 MiB per batch, 4096 px per side, raster only; SVG is unsupported.
+The connected MCP app is using an older server/catalog rather than the CWapi 2.0.2 Coding route.
 
 **How to fix**
 
-Use `coding_attachment` only for validated raster images in the workspace. Read source, Markdown, JSON, logs and other text through `coding_exec`.
+Confirm that CWapi 2.0.2 and its Coding Tunnel are running, reconnect the Coding app, and verify the exact four-tool catalog. Coding MCP no longer transfers files or images.
 
 ## `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`
 
@@ -226,11 +222,25 @@ The client sent CWapi's unsupported generic top-level `attachments` file extensi
 
 **What to check**
 
-Inspect the client request shape. Agent supports raster images only through standard Chat Completions `image_url` data URIs.
+Inspect the client request shape. Agent accepts text and tool JSON only.
 
 **How to fix**
 
-Remove generic file attachments. Send supported inline raster images with `image_url`, or let the local application provide text/files through its own messages/tools workflow.
+Remove the top-level `attachments` field. Provide textual context or use the local application's own tools to inspect local data.
+
+## `AGENT_MEDIA_INPUT_UNSUPPORTED`
+
+**Symptom**
+
+A local Agent request is rejected with `AGENT_MEDIA_INPUT_UNSUPPORTED`.
+
+**Likely cause**
+
+One or more Chat Completions message content parts are not `text`, for example an `image_url` part.
+
+**How to fix**
+
+Send text-only message content and tool JSON. CWapi does not enqueue or return file/image content through Agent MCP.
 
 ## Agent Provider returns 401 `invalid_api_key`
 

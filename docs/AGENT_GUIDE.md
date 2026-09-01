@@ -30,6 +30,8 @@ Local software
 
 CWapi's local Provider binds only to `127.0.0.1`.
 
+Web GPT is the sole planner and task controller. CWapi maintains bridge/OpenAI-request state, while the local software executes its own tools and owns any command/process sessions. An MCP `request_id` is a communication transaction ID, never a local process session ID.
+
 ## Local Provider configuration
 
 Default configuration:
@@ -124,6 +126,10 @@ If `agent_open` reports a `max_inflight` smaller than 4, use that smaller capaci
 
 `agent_exchange` is intentionally an atomic “submit finished responses + wait for the next batch” operation. This reduces unnecessary extra MCP round trips.
 
+A response without tool calls is acknowledged immediately with top-level `state=responses`. If a submitted response contains `tool_calls`, the same exchange keeps its bounded wait open so the local software's next tool-result OpenAI request can be returned directly. The local HTTP waiter is released as soon as its response is accepted.
+
+Every successful exchange includes structured `activity`: a monotonic state revision, changed/pending/inflight/active counts, consecutive unchanged idle count, wait duration, last broker state/error, and a next-action hint. `state=no_request` is reserved for an actual bounded-wait timeout with no new OpenAI request.
+
 ## `request_id`
 
 Every returned local model request has an exact `request_id`. It is the public correlation key and must be preserved exactly.
@@ -131,6 +137,8 @@ Every returned local model request has an exact `request_id`. It is the public c
 Multiple requests may be in flight at the same time, so do not correlate by arrival order, prompt text, client name, or vague human intuition.
 
 A `delivery` value greater than 1 means the **same request_id was redelivered**. It is not new work. If Web GPT already completed that request, safely re-send the same completed response rather than inventing a different one.
+
+Returned requests include created/claimed/last-delivered/deadline timestamps. A local client may also provide bounded top-level `metadata.task_id` and `metadata.correlation_id`; CWapi preserves those client-supplied identities but never invents a task ID from unrelated request IDs.
 
 ## Multiple independent requests
 
@@ -175,46 +183,17 @@ If one request needs several independent functions and all arguments are already
 
 Keep calls sequential only when a later tool call genuinely depends on the result of an earlier one. Splitting independent calls across extra model turns wastes time and resends large prompts/tool schemas for no benefit.
 
+Function `arguments` may be supplied as an OpenAI JSON string or as a native JSON object. JSON response `content` may also be native. CWapi canonicalizes these values to OpenAI-compatible strings, reducing nested-JSON and Windows-path escaping failures while keeping equivalent duplicate responses idempotent.
+
 ## Text responses
 
 A completed response can return normal assistant content. CWapi normalizes the Agent response into the OpenAI-compatible Chat Completions message/finish-reason shape expected by the local client.
 
 Both non-streaming and streaming requests are supported. Streaming responses are emitted as Chat Completions SSE chunks and finish with `[DONE]`.
 
-## Inline images
+## Files and media are not supported
 
-Agent supports bounded raster images only through the standard Chat Completions message-content form:
-
-```json
-{
-  "type": "image_url",
-  "image_url": {
-    "url": "data:image/png;base64,..."
-  }
-}
-```
-
-CWapi:
-
-1. validates the data URI and raster image;
-2. removes the raw image bytes from the broker JSON payload;
-3. stores the image temporarily for that request;
-4. returns attachment metadata plus native MCP `ImageContent` from `agent_exchange`;
-5. removes temporary image data on terminal request paths, broker shutdown, and startup cleanup.
-
-Current Agent image limits:
-
-- maximum 8 images;
-- maximum 8 MiB per image;
-- maximum 16 MiB image batch;
-- maximum 2048 px per side;
-- raster only; SVG is unsupported.
-
-The HTTP body limit is 24 MiB so base64/JSON overhead can fit. After images are extracted, the normal broker JSON request/batch remains limited to 1 MiB.
-
-## Generic files are not supported
-
-CWapi deliberately rejects a top-level generic file extension such as:
+Agent accepts text and tool JSON only. CWapi rejects a top-level attachment extension such as:
 
 ```json
 {"attachments": [...]}
@@ -228,13 +207,23 @@ AGENT_FILE_ATTACHMENTS_UNSUPPORTED
 
 Text files, PDFs, archives, office documents, and other generic files are not converted into MCP resources for Agent.
 
+Any non-text Chat Completions message content part, including `image_url`, is rejected before broker admission with:
+
+```text
+AGENT_MEDIA_INPUT_UNSUPPORTED
+```
+
+`agent_exchange` emits JSON request/result content only and never returns MCP files, resources, or images.
+
 An image/file uploaded to the ChatGPT conversation also has **no reverse path** into the local OpenAI-compatible client. If the local client needs data, it must provide that data through its own supported Chat Completions messages/tools.
 
 ## `agent_close`
 
 Call `agent_close()` when the continuous Agent task is truly finished.
 
-Do not close the bridge just because one `agent_exchange` returns `no_request`. A temporarily empty queue is normal.
+Do not close the bridge just because one `agent_exchange` returns `no_request`. It means only that no new local OpenAI request arrived during that wait window; it does not mean any local command is still running and is not, by itself, a reason to wait again. Continue waiting only for a separately known active process, external condition, or user-requested monitor. After two unchanged idle exchanges, reassess the task, actual process state, and expected artifacts.
+
+When a local process exits or reports PASS/FAIL, treat that process session as terminal, stop polling it, and advance to the next pending verification or closeout step.
 
 Closing the bridge makes new local requests unable to enter a usable Web GPT exchange path until Agent is opened again.
 

@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-const Version = "2.0.0"
+const Version = "2.0.2"
 
 // SourceCommit is injected by the production build with -ldflags -X.
 // Development builds fall back to Go's embedded VCS metadata when available.

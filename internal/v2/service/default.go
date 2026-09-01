@@ -9,7 +9,6 @@ import (
 
 	"github.com/AAAYNMMM/CWapi/internal/credentials"
 	"github.com/AAAYNMMM/CWapi/internal/v2/agentbroker"
-	"github.com/AAAYNMMM/CWapi/internal/v2/attachments"
 	"github.com/AAAYNMMM/CWapi/internal/v2/codextoolhost"
 	"github.com/AAAYNMMM/CWapi/internal/v2/coding"
 	v2config "github.com/AAAYNMMM/CWapi/internal/v2/config"
@@ -70,11 +69,7 @@ func NewDefault(configPath string) (*Service, error) {
 	}
 	deps.AgentTunnel = agentTunnelManager
 	if cfg.Agent.Enabled {
-		attachmentStore, err := attachments.NewTransientStore(dataRoot)
-		if err != nil {
-			return nil, err
-		}
-		broker := agentbroker.NewWithAttachmentStore(agentbroker.Config{}, attachmentStore)
+		broker := agentbroker.New(agentbroker.Config{})
 		provider, err := agentbroker.NewProvider(cfg.Agent, broker)
 		if err != nil {
 			broker.Shutdown()

@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-[![Release](https://img.shields.io/github/v/release/AAAYNMMM/chatgpt-work-api-Releases?filter=v2.0.0&style=flat-square&label=Release)](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/tag/v2.0.0)
+[![Release](https://img.shields.io/github/v/release/AAAYNMMM/chatgpt-work-api-Releases?filter=v2.0.2&style=flat-square&label=Release)](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/tag/v2.0.2)
 ![Windows](https://img.shields.io/badge/Windows-11%20x64-0078d4?style=flat-square)
 ![MCP](https://img.shields.io/badge/MCP-Coding%20%2B%20Agent-6f42c1?style=flat-square)
 ![OpenAI compatible](https://img.shields.io/badge/API-OpenAI--compatible-10a37f?style=flat-square)
@@ -14,7 +14,7 @@ CWapi 2.0 provides two isolated bridges:
 - **Coding** lets ChatGPT Web read, edit, build, test, and operate a local Git workspace through MCP.
 - **Agent** exposes a localhost OpenAI-compatible API so compatible local software can send model requests to Web GPT through an Agent MCP bridge.
 
-Current release: **`2.0.0`**.
+Current release: **`2.0.2`**.
 
 ## What is CWapi?
 
@@ -38,7 +38,6 @@ The Coding tool catalog is deliberately small:
 coding_open
 coding_exec
 coding_status
-coding_attachment
 coding_close
 ```
 
@@ -83,7 +82,7 @@ Software such as Cline or Roo Code **may** work when configured for a custom Ope
 - Keep normal Coding work in `SAFE`, then switch to `FULL` only for explicitly authorized operations that need `.git` metadata writes or broader host access.
 - Give OpenAI-compatible local software a localhost model endpoint backed by Web GPT.
 - Keep Coding and Agent independent: separate MCP tokens, tool catalogs, Tunnel configuration, and runtime paths.
-- Keep ordinary files out of the MCP attachment path; only validated raster images are transported as native MCP image content.
+- Keep file and image transfer disabled on both MCP surfaces; inspect repository text through bounded `coding_exec` commands.
 
 ## Which version should I use?
 
@@ -106,7 +105,7 @@ The two lines are not configuration-compatible. Read the [Version Guide](docs/VE
 - Run compilers, test runners, scripts, local servers, and Git commands.
 - Inspect HEAD, tracking HEAD, dirty state, and divergence with `coding_status`.
 - Resume the same active repository from a new ChatGPT conversation with compatible `coding_open(..., resume=true)`.
-- Return supported workspace raster images with `coding_attachment`.
+- Keep source and other inspectable text in the command path; Coding exposes no file or image transfer tool.
 
 ### Agent capabilities
 
@@ -115,12 +114,15 @@ The two lines are not configuration-compatible. Read the [Version Guide](docs/VE
 - Function/tool-call responses returned to the local client for that client to execute.
 - Multiple independent requests correlated by exact `request_id`.
 - Bounded queue and request timeout.
-- Inline raster images through standard Chat Completions `image_url` data URIs.
+- Structured exchange activity with monotonic revision, queue counts, idle tracking, wait duration, and next-action guidance.
+- Terminal responses are acknowledged as `state=responses`; `no_request` means only that a real bounded wait expired without a new OpenAI request.
+- Native JSON tool arguments and JSON content are canonicalized to OpenAI-compatible strings.
+- Text and tool JSON only; top-level attachments and non-text message content are rejected before broker admission.
 - Independent Agent MCP bridge and independent Secure MCP Tunnel configuration.
 
 ## 5-minute quick start
 
-1. Download [`CWapi-v2.0.0.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.0/CWapi-v2.0.0.zip).
+1. Download [`CWapi-v2.0.2.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.2/CWapi-v2.0.2.zip).
 2. Fully extract it to a user-writable directory and run `CWapi.exe`.
 3. For **Coding**, create an OpenAI Secure MCP Tunnel, obtain its Tunnel ID and Runtime API key, then enter them in the Coding Tunnel panel.
 4. In ChatGPT, use a workspace/plan that supports the MCP capabilities you need, enable the applicable Developer Mode/custom-app flow, and connect the matching Tunnel. ChatGPT cannot directly connect to CWapi's `127.0.0.1` MCP URL.
@@ -145,11 +147,11 @@ A new non-resume open refuses tracked dirty state, local commits, or divergence 
 
 If you move the **entire** extracted CWapi directory, its adjacent `CWapi-data` moves with it. If you move only the clean program/runtime files, the new location gets a fresh data root.
 
-## Images and ordinary files
+## Files and images
 
-`coding_attachment` is image-only. Supported raster images are returned as native MCP `ImageContent`. Source, Markdown, JSON, logs, PDFs, archives, DOCX, and other ordinary files are **not** generic MCP attachments. Read inspectable text with `coding_exec`.
+CWapi 2.0.2 does not transfer files or images through Coding or Agent MCP. Source, Markdown, JSON, logs, and other inspectable repository text are read with bounded `coding_exec` commands.
 
-Agent follows the same principle: local clients may send bounded inline raster images through `image_url` data URIs. A top-level generic file `attachments` extension is rejected with `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`.
+Agent accepts text and tool JSON only. Top-level `attachments` is rejected with `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`; non-text message content such as `image_url` is rejected with `AGENT_MEDIA_INPUT_UNSUPPORTED`.
 
 Uploading a file into a ChatGPT conversation does not automatically write that file into a Coding workspace or Agent client.
 
@@ -193,15 +195,15 @@ Read [Security](docs/SECURITY.md) for the detailed boundary.
 
 ## Release tracks
 
-- [`main`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/main): CWapi 2.x, current release `2.0.0`.
+- [`main`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/main): CWapi 2.x, current release `2.0.2`.
 - [`1.6.x`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/1.6.x): CWapi 1.6.x legacy line, current release `1.6.3`.
 
 ## Development repository vs release repository
 
 This repository contains clean release-facing source snapshots, portable releases, and user documentation. Development history, tests, validation/package automation, and release engineering live in [`AAAYNMMM/CWapi`](https://github.com/AAAYNMMM/CWapi).
 
-CWapi 2.0.0 was built from development commit:
+CWapi 2.0.2 was built from development commit:
 
 ```text
-d904ae80428c90717e050a151c65fa35b6b83c63
+05068c482a617c6beb2acd5c6d2ff15cfedc7598
 ```

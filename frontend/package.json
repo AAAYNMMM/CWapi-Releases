@@ -1,12 +1,12 @@
 {
   "name": "cwapi-frontend",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.0.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && node -e \"require('fs').writeFileSync('dist/gitkeep','')\"",
-    "test": "vitest run",
+    "build": "node ./node_modules/typescript/bin/tsc && node ./node_modules/vite/bin/vite.js build --configLoader native && node -e \"require('fs').writeFileSync('dist/gitkeep','')\"",
+    "test": "node ./node_modules/vitest/vitest.mjs run --configLoader native --pool threads --maxWorkers 1 --minWorkers 1",
     "preview": "vite preview"
   },
   "dependencies": {

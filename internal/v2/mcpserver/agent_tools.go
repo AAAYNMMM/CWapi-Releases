@@ -3,9 +3,7 @@ package mcpserver
 import (
 	"context"
 	"errors"
-	"net/url"
 
-	"github.com/AAAYNMMM/CWapi/internal/v2/attachments"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -21,6 +19,7 @@ type AgentOpenOutput struct {
 	State       string `json:"state"`
 	Resumed     bool   `json:"resumed"`
 	MaxInflight int    `json:"max_inflight"`
+	Revision    uint64 `json:"state_revision"`
 }
 
 type AgentExchangeResponse struct {
@@ -40,16 +39,34 @@ type AgentExchangeResult struct {
 }
 
 type AgentExchangeRequest struct {
-	RequestID    string                 `json:"request_id"`
-	Delivery     int                    `json:"delivery"`
-	DeadlineAt   string                 `json:"deadline_at"`
-	Request      map[string]any         `json:"request"`
-	Attachments  []attachments.Metadata `json:"attachments,omitempty"`
-	ContentItems []attachments.Item     `json:"-"`
+	RequestID       string         `json:"request_id"`
+	TaskID          string         `json:"task_id,omitempty"`
+	CorrelationID   string         `json:"correlation_id,omitempty"`
+	State           string         `json:"state"`
+	Delivery        int            `json:"delivery"`
+	CreatedAt       string         `json:"created_at"`
+	ClaimedAt       string         `json:"claimed_at"`
+	LastDeliveredAt string         `json:"last_delivered_at"`
+	DeadlineAt      string         `json:"deadline_at"`
+	Request         map[string]any `json:"request"`
+}
+
+type AgentExchangeActivity struct {
+	Revision     uint64 `json:"revision"`
+	Changed      bool   `json:"changed"`
+	Pending      int    `json:"pending"`
+	Inflight     int    `json:"inflight"`
+	Active       int    `json:"active"`
+	IdleCount    int    `json:"idle_count"`
+	WaitedMillis int64  `json:"waited_millis"`
+	LastState    string `json:"last_state,omitempty"`
+	LastError    string `json:"last_error,omitempty"`
+	NextAction   string `json:"next_action"`
 }
 
 type AgentExchangeOutput struct {
 	State    string                 `json:"state"`
+	Activity AgentExchangeActivity  `json:"activity"`
 	Results  []AgentExchangeResult  `json:"results,omitempty"`
 	Requests []AgentExchangeRequest `json:"requests,omitempty"`
 }
@@ -79,8 +96,10 @@ func RegisterAgent(server *mcp.Server, service AgentService) error {
 	})
 	mcp.AddTool(server, &mcp.Tool{
 		Name: ToolAgentExchange,
-		Description: "Atomically submit results for a previous batch and wait for the next local software request batch on CWapi's single active bridge. " +
-			"Process every returned request independently; delivery greater than one is a retry of the same request_id. Inline raster images may be returned as native MCP ImageContent; generic files are not supported.",
+		Description: "Atomically submit results for a previous batch on CWapi's single active bridge; non-tool terminal responses return immediately as state=responses, while tool_calls keep a bounded wait open for the local tool-result request batch. " +
+			"Process every returned request independently; delivery greater than one is a retry of the same request_id, never a local process session. " +
+			"A no_request result means only that the bounded wait ended with no OpenAI request; inspect activity and do not use it as evidence that local work is running. " +
+			"Function arguments and JSON content may be supplied as native JSON values to avoid nested escaping. File and image transfer are not supported.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, input AgentExchangeInput) (*mcp.CallToolResult, AgentExchangeOutput, error) {
 		if input.Capacity < 0 {
 			return nil, AgentExchangeOutput{}, errors.New("AGENT_EXCHANGE_INPUT_INVALID")
@@ -89,21 +108,7 @@ func RegisterAgent(server *mcp.Server, service AgentService) error {
 		if err != nil {
 			return nil, output, err
 		}
-		for _, request := range output.Requests {
-			for _, item := range request.ContentItems {
-				if item.Metadata.Kind != "image" {
-					return nil, AgentExchangeOutput{}, errors.New("AGENT_IMAGE_ATTACHMENT_REQUIRED")
-				}
-			}
-		}
-		result := &mcp.CallToolResult{}
-		for _, request := range output.Requests {
-			for _, item := range request.ContentItems {
-				uri := "cwapi://agent/" + url.PathEscape(request.RequestID) + "/" + url.PathEscape(item.Metadata.Name)
-				result.Content = append(result.Content, attachments.MCPContent(item, "request_id="+request.RequestID, uri)...)
-			}
-		}
-		return result, output, nil
+		return nil, output, nil
 	})
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        ToolAgentClose,

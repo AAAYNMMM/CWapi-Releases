@@ -17,7 +17,7 @@ CWapi 现在有两条彼此独立的发行路线。它们都在解决“让 Web 
 
 | 项目 | CWapi 2.x | CWapi 1.6.x |
 | --- | --- | --- |
-| 当前版本 | `2.0.0` | `1.6.3` |
+| 当前版本 | `2.0.2` | `1.6.3` |
 | 发行分支 | [`main`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/main) | [`1.6.x`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/1.6.x) |
 | ChatGPT 连接 | 通过 OpenAI Secure MCP Tunnel 连接 MCP | 旧版 Slack 中转工作流 |
 | Coding 通信 | 直接 Coding MCP tool surface | GitHub + Slack 工作流 |
@@ -67,7 +67,7 @@ CWapi 2.0 的 Coding / Agent 不使用 Slack。2.0 文档里出现 Slack，只�
 
 ## 发行链接
 
-- CWapi 2.0.0 portable：[`CWapi-v2.0.0.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.0/CWapi-v2.0.0.zip)
+- CWapi 2.0.2 portable：[`CWapi-v2.0.2.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.2/CWapi-v2.0.2.zip)
 - 2.x 源码与文档：[`main`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/main)
 - 1.6.x 源码与文档：[`1.6.x`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/1.6.x)
 

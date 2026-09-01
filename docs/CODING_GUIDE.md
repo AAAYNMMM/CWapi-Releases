@@ -28,7 +28,6 @@ The bundled Codex runtime is **not** a second coding agent. CWapi uses app-serve
 coding_open
 coding_exec
 coding_status
-coding_attachment
 coding_close
 ```
 
@@ -205,7 +204,7 @@ When several searches are independent, group them sensibly. Avoid repeatedly rea
 
 Source, Markdown, JSON, config, logs, and other inspectable text should be read through `coding_exec`.
 
-Do **not** use `coding_attachment` for text. CWapi intentionally no longer converts ordinary files to MCP `EmbeddedResource` content.
+Coding MCP has no file or image transfer tool and does not emit MCP `ImageContent` or `EmbeddedResource` content.
 
 For large files, prefer bounded output: a relevant range, search matches with context, or a project-specific query. This reduces MCP round trips and avoids flooding the conversation with irrelevant bytes.
 
@@ -297,39 +296,9 @@ Private repository clone/fetch/push uses the current Windows user's existing Git
 
 If authentication fails, verify the Windows user's GitHub/Git credential setup outside CWapi. Do not place GitHub tokens in prompts or repository files.
 
-## `coding_attachment`
+## Files and images
 
-Use it only when a raster image already exists inside the active repository workspace and Web GPT genuinely needs to see it.
-
-Example conceptual call:
-
-```text
-coding_attachment(
-  repository_url="https://github.com/OWNER/REPO",
-  paths=["artifacts/result.png"]
-)
-```
-
-Current Coding image limits:
-
-- maximum 16 images;
-- maximum 32 MiB per image;
-- maximum 64 MiB total;
-- maximum 4096 px per image side;
-- supported validated raster formats include PNG, JPEG, GIF, and WebP;
-- SVG is rejected.
-
-If any requested file is not a supported raster image, the call fails with:
-
-```text
-CODING_ATTACHMENT_IMAGE_ONLY
-```
-
-### Why ordinary files are not attachments
-
-MCP image delivery has been explicitly bounded and verified. Generic text/binary file transfer would create a much broader data-movement surface and is unnecessary for normal source work.
-
-Readable content can already be inspected precisely with `coding_exec`, which is safer and more efficient than blindly shipping whole files into the conversation.
+Coding MCP does not transfer files or images. Inspect source, Markdown, JSON, configuration, logs, and other text with bounded `coding_exec` commands. Binary files and images remain in the workspace and are not copied into the ChatGPT conversation.
 
 ## Closing and later resuming
 

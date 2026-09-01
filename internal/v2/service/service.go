@@ -22,8 +22,9 @@ type CodingLifecycle interface {
 	CloseAll(context.Context) error
 }
 
-type CodingAccessProfile interface {
+type CodingPolicy interface {
 	SetAccessProfile(string) error
+	SetNetworkAccess(bool) error
 }
 
 type AgentProviderLifecycle interface {
@@ -56,6 +57,7 @@ type Snapshot struct {
 	State              string                        `json:"state"`
 	MCP                mcpserver.Snapshot            `json:"mcp"`
 	CodexAccessProfile string                        `json:"codex_access_profile"`
+	CodexNetworkAccess bool                          `json:"codex_network_access"`
 	Codex              codextoolhost.RuntimeSnapshot `json:"codex"`
 	Coding             coding.RuntimeSnapshot        `json:"coding"`
 	Workspaces         workspace.IndexSnapshot       `json:"workspaces"`
@@ -75,7 +77,7 @@ type Service struct {
 	config          v2config.Config
 	mcp             *mcpserver.Runtime
 	codingLifecycle CodingLifecycle
-	codingAccess    CodingAccessProfile
+	codingPolicy    CodingPolicy
 	codingSnapshot  func() coding.RuntimeSnapshot
 	workspaceIndex  func() workspace.IndexSnapshot
 	codexProbe      func() codextoolhost.RuntimeSnapshot
@@ -143,10 +145,10 @@ func newConfigured(configPath string, cfg v2config.Config, deps Dependencies) (*
 	if err != nil {
 		return nil, err
 	}
-	codingAccess, _ := deps.Coding.(CodingAccessProfile)
+	codingPolicy, _ := deps.Coding.(CodingPolicy)
 	return &Service{
 		configPath: configPath, config: cfg, mcp: gateway,
-		codingLifecycle: deps.CodingLifecycle, codingAccess: codingAccess, codingSnapshot: deps.CodingSnapshot,
+		codingLifecycle: deps.CodingLifecycle, codingPolicy: codingPolicy, codingSnapshot: deps.CodingSnapshot,
 		workspaceIndex: deps.WorkspaceIndex, codexProbe: deps.CodexProbe,
 		agentBroker: deps.AgentBroker, agentProvider: deps.AgentProvider,
 		tunnel: deps.Tunnel, agentTunnel: deps.AgentTunnel,
@@ -311,7 +313,7 @@ func (s *Service) Snapshot() Snapshot {
 		workspaceState = s.workspaceIndex()
 	}
 	return Snapshot{
-		State: state, MCP: s.mcp.Snapshot(), CodexAccessProfile: cfg.Codex.AccessProfile,
+		State: state, MCP: s.mcp.Snapshot(), CodexAccessProfile: cfg.Codex.AccessProfile, CodexNetworkAccess: cfg.Codex.NetworkAccess,
 		Codex: codexState, Coding: codingState, Workspaces: workspaceState,
 		AgentEnabled: cfg.Agent.Enabled, AgentProvider: provider, Agent: broker,
 		OpenAITunnel: openAITunnel, AgentOpenAITunnel: agentOpenAITunnel, LastError: lastError,
@@ -331,7 +333,7 @@ func (s *Service) UpdateCodexAccessProfile(profile string) (Snapshot, error) {
 	s.mu.RLock()
 	before := s.config
 	configPath := s.configPath
-	setter := s.codingAccess
+	setter := s.codingPolicy
 	s.mu.RUnlock()
 	candidate := before
 	candidate.Codex.AccessProfile = profile
@@ -348,6 +350,44 @@ func (s *Service) UpdateCodexAccessProfile(profile string) (Snapshot, error) {
 		return s.Snapshot(), err
 	}
 	if err := setter.SetAccessProfile(candidate.Codex.AccessProfile); err != nil {
+		rollbackErr := v2config.SaveAtomic(configPath, before)
+		return s.Snapshot(), errors.Join(err, rollbackErr)
+	}
+	s.mu.Lock()
+	s.config = candidate
+	s.mu.Unlock()
+	return s.Snapshot(), nil
+}
+
+func (s *Service) UpdateCodexNetworkAccess(allowed bool) (Snapshot, error) {
+	if s == nil {
+		return Snapshot{State: "unavailable"}, errors.New("V2_SERVICE_UNAVAILABLE")
+	}
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.closed {
+		return s.Snapshot(), errors.New("V2_SERVICE_CLOSED")
+	}
+	s.mu.RLock()
+	before := s.config
+	configPath := s.configPath
+	setter := s.codingPolicy
+	s.mu.RUnlock()
+	candidate := before
+	candidate.Codex.NetworkAccess = allowed
+	if err := v2config.Validate(candidate); err != nil {
+		return s.Snapshot(), err
+	}
+	if candidate.Codex.NetworkAccess == before.Codex.NetworkAccess {
+		return s.Snapshot(), nil
+	}
+	if setter == nil {
+		return s.Snapshot(), errors.New("V2_CODING_POLICY_UNAVAILABLE")
+	}
+	if err := v2config.SaveAtomic(configPath, candidate); err != nil {
+		return s.Snapshot(), err
+	}
+	if err := setter.SetNetworkAccess(allowed); err != nil {
 		rollbackErr := v2config.SaveAtomic(configPath, before)
 		return s.Snapshot(), errors.Join(err, rollbackErr)
 	}

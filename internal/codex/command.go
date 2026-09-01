@@ -15,13 +15,14 @@ import (
 )
 
 type CommandSpec struct {
-	ProcessID    string
-	Executable   string
-	Argv         []string
-	CWD          string
-	WritableRoot string
-	Environment  []string
-	Sandbox      string
+	ProcessID     string
+	Executable    string
+	Argv          []string
+	CWD           string
+	WritableRoot  string
+	Environment   []string
+	Sandbox       string
+	NetworkAccess bool
 }
 
 const (
@@ -231,7 +232,7 @@ func commandParams(spec CommandSpec) map[string]any {
 	}
 	sandboxPolicy := map[string]any{
 		"type": "workspaceWrite", "writableRoots": []string{spec.WritableRoot},
-		"networkAccess": true, "excludeSlashTmp": true, "excludeTmpdirEnvVar": true,
+		"networkAccess": spec.NetworkAccess, "excludeSlashTmp": true, "excludeTmpdirEnvVar": true,
 	}
 	if spec.Sandbox == CommandSandboxFullAccess {
 		sandboxPolicy = map[string]any{"type": "dangerFullAccess"}

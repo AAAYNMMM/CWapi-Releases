@@ -10,31 +10,32 @@
 
 ## Coding
 
-SAFE maps to upstream Codex `workspaceWrite`. Codex protects `.git` within writable roots, so SAFE is intended for read/edit/test. FULL maps to upstream `dangerFullAccess` and is required for authorized Git metadata changes such as commit/push.
+CWapi resolves the final target executable/argv/CWD and calls `executionpolicy.Check` immediately before every private app-server `command/exec`. Destructive Git operations, Git credential plumbing, unsafe Git global redirection/configuration and forbidden system tools are permanently denied in both profiles. Generated Codex rules remain defense in depth; they are not the authoritative boundary.
 
-CWapi validates exact command/argv/CWD, resolves the final executable, and invokes only the private app-server `command/exec` development operation. It never calls Codex thread/turn/auth/account/model APIs. Command children receive a bounded environment without OpenAI/Codex/GitHub token variables. Git may still use the current Windows user's existing Git credential helper.
+SAFE maps to upstream Codex `workspaceWrite` and is intended for source read/edit/test. Each command receives workspace-local Temp, language/package caches, application-data directories and a synthetic user profile. OpenAI/Codex/GitHub token variables, host Git global/system configuration, Git hooks and interactive credential discovery are excluded. Network access is a separate default-off capability and can be changed without changing SAFE/FULL.
 
-SAFE/FULL are the complete CWapi 2.0 Coding access profiles. CWapi does not issue an additional reusable elevation credential.
+FULL grants upstream `dangerFullAccess` to every command that first passes CWapi permanent policy and restores the current Windows user profile/AppData environment. It still does not bypass permanent denials: destructive Git, credential commands, forbidden system tools, protected CWapi paths, repository Git lookalikes for guarded metadata operations, and amend/force/delete/receive-pack/local-transport forms remain rejected. A direct FULL push additionally requires explicit network access, limits transport to HTTPS/SSH, and is the only command allowed to restore host Git configuration/credential-helper discovery. API tokens remain stripped from the child environment, and `git credential` plus credential-manager executables remain permanently denied.
+
+SAFE/FULL are the complete CWapi 2.0 Coding access profiles. CWapi does not issue an additional reusable elevation credential. Workspace-local runtime roots are checked against symlink/junction redirection before the host creates Temp/cache files. Commands launched by repository test/build scripts remain contained by the selected upstream sandbox; CWapi's exact-invocation policy is applied to the resolved top-level target.
 
 The Coding MCP public surface uses `repository_url` as stable identity and does not expose the random internal session ID. CWapi still keeps that internal ID and exact repository ownership mapping for cancellation, close races and stale-operation protection.
 
-`coding_attachment` is limited to raster images and returns only native MCP `ImageContent`. Non-image workspace paths are rejected with `CODING_ATTACHMENT_IMAGE_ONLY`; ordinary files are not exposed as MCP `EmbeddedResource`. Workspace text needed by Web GPT is read through bounded `coding_exec` output.
+Coding MCP has no file or image transfer tool and emits no MCP file/resource/image content. Workspace text needed by Web GPT is read through bounded `coding_exec` output.
 
 Workspace maintenance resolves targets under the managed root and is available only from the local Desktop confirmation flow.
 
 ## Agent
 
-- HTTP request body hard limit 24 MiB, including inline image base64 overhead；
-- image limits: 8 images, 8 MiB per image, 16 MiB total and 2048 px per image side；
+- HTTP request body hard limit 1 MiB；
 - active queue hard limit 16；
 - internal bridge IDs remain random and generation-scoped; public `request_id` remains random and exact-correlated；
+- `request_id` is transaction-only and is never promoted to third-party command/session identity；optional `metadata.task_id` / `metadata.correlation_id` is bounded and client-supplied；
 - stale lease, timeout, disconnect and close terminalize requests once；
 - malformed messages/tools/responses are rejected before delivery；
-- only standard `image_url` data-URI raster images enter the attachment path；top-level generic file attachments return `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`；
-- inline image bytes are validated, stripped from broker JSON and exposed only as request-scoped native MCP `ImageContent`；
-- temporary image files use sanitized names, integrity metadata and a dedicated `CWapi-data/temp/agent-attachments` root；all terminal paths, broker shutdown and startup remove them；
-- Agent does not emit MCP `EmbeddedResource` for text, PDF, archive, document or other ordinary files；
-- image flow is only from local software to Web GPT；ChatGPT conversation uploads are not imported into local software；
+- exchange activity reports only broker revision and queue truth；`no_request` never asserts external process state；
+- top-level `attachments` is rejected with `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`；
+- any non-text message content part, including `image_url`, is rejected with `AGENT_MEDIA_INPUT_UNSUPPORTED` before broker admission；
+- Agent emits no MCP file/resource/image content and ChatGPT conversation uploads are not imported into local software；
 - normal observability stores metadata only, not full conversation payloads。
 
 Server Instructions may guide workflow and efficiency, but they are not a security boundary. Authorization, input validation, request correlation, duplicate handling and terminal-state rules remain enforced by Go code.
