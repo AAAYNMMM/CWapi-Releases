@@ -8,7 +8,7 @@ Use this guide from the symptom you can actually see. Check [Getting Started](GE
 
 **Symptom**
 
-The Coding app does not expose `coding_open` / `coding_exec` / `coding_status` / `coding_close`, or the Agent app does not expose `agent_open` / `agent_exchange` / `agent_close`.
+The Coding app does not expose `coding_open` / `coding_exec` / `coding_status` / `coding_close` / `load_skill`, or the Agent app does not expose `agent_open` / `agent_exchange` / `agent_close`.
 
 **Likely cause**
 
@@ -137,7 +137,7 @@ The portable was only partially copied/extracted, runtime files were removed, or
 
 **How to fix**
 
-Re-extract the complete official `CWapi-v2.0.4.zip` into a clean user-writable directory. Do not replace the bundled runtime with an arbitrary Codex installation.
+Re-extract the complete official `CWapi-v2.0.5.zip` into a clean user-writable directory. Do not replace the bundled runtime with an arbitrary Codex installation.
 
 ## Private Git clone/fetch/push fails
 
@@ -204,11 +204,11 @@ The ChatGPT Coding app shows five tools or still lists `coding_attachment`.
 
 **Likely cause**
 
-The connected MCP app is using an older server/catalog rather than the CWapi 2.0.4 Coding route.
+The connected MCP app is using an older server/catalog rather than the CWapi 2.0.5 Coding route.
 
 **How to fix**
 
-Confirm that CWapi 2.0.4 and its Coding Tunnel are running, reconnect the Coding app, and verify the exact four-tool catalog. Coding MCP no longer transfers files or images.
+Confirm that CWapi 2.0.5 and its Coding Tunnel are running, reconnect the Coding app, and verify the exact five-tool catalog. Coding MCP no longer transfers files or images.
 
 ## `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`
 

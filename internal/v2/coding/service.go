@@ -49,20 +49,23 @@ type openingRecord struct {
 type record struct {
 	mu sync.Mutex
 
-	repository     string
-	repositoryURL  string
-	path           string
-	targetRef      string
-	resolvedCommit string
-	currentHead    string
-	currentBranch  string
-	detached       bool
-	trackedDirty   bool
-	resumed        bool
-	busy           bool
-	closing        bool
-	cancel         context.CancelFunc
-	done           chan struct{}
+	repository      string
+	repositoryURL   string
+	path            string
+	targetRef       string
+	resolvedCommit  string
+	currentHead     string
+	currentBranch   string
+	detached        bool
+	trackedDirty    bool
+	resumed         bool
+	busy            bool
+	closing         bool
+	activeAction    string
+	activeCommand   string
+	activeStartedAt time.Time
+	cancel          context.CancelFunc
+	done            chan struct{}
 }
 
 func New(manager *workspace.Manager, host *codextoolhost.Host) (*Service, error) {
@@ -293,7 +296,11 @@ func (s *Service) Exec(ctx context.Context, input mcpserver.CodingExecInput) (mc
 	if err != nil {
 		return mcpserver.CodingExecOutput{}, err
 	}
-	commandCtx, finish, err := record.beginOperation(ctx)
+	action := strings.ToLower(strings.TrimSpace(input.Action))
+	if action == "" {
+		action = "run"
+	}
+	commandCtx, finish, err := record.beginOperation(ctx, action, strings.TrimSpace(input.Command))
 	if err != nil {
 		return mcpserver.CodingExecOutput{}, err
 	}
@@ -303,6 +310,10 @@ func (s *Service) Exec(ctx context.Context, input mcpserver.CodingExecInput) (mc
 		Action: input.Action, ProcessID: input.ProcessID, Command: input.Command,
 		Argv: input.Argv, CWD: input.CWD, TimeoutSeconds: input.TimeoutSeconds,
 	})
+	// Release foreground operation ownership as soon as the local executor has
+	// reached a terminal return. The deferred call remains as a panic/early-exit
+	// safety net, and beginOperation makes finish idempotent.
+	finish()
 	if err != nil {
 		return mcpserver.CodingExecOutput{}, err
 	}
@@ -311,7 +322,7 @@ func (s *Service) Exec(ctx context.Context, input mcpserver.CodingExecInput) (mc
 		Stdout: result.Stdout, Stderr: result.Stderr, Truncated: result.Truncated,
 	}, nil
 }
-func (r *record) beginOperation(ctx context.Context) (context.Context, func(), error) {
+func (r *record) beginOperation(ctx context.Context, action, command string) (context.Context, func(), error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -329,13 +340,22 @@ func (r *record) beginOperation(ctx context.Context) (context.Context, func(), e
 		return nil, nil, errors.New("CODING_COMMAND_ACTIVE")
 	}
 	r.busy, r.cancel, r.done = true, cancel, done
+	r.activeAction = action
+	r.activeCommand = command
+	r.activeStartedAt = time.Now().UTC()
 	r.mu.Unlock()
+	var once sync.Once
 	finish := func() {
-		cancel()
-		r.mu.Lock()
-		r.busy, r.cancel, r.done = false, nil, nil
-		close(done)
-		r.mu.Unlock()
+		once.Do(func() {
+			cancel()
+			r.mu.Lock()
+			if r.done == done {
+				r.busy, r.cancel, r.done = false, nil, nil
+				r.activeAction, r.activeCommand, r.activeStartedAt = "", "", time.Time{}
+			}
+			r.mu.Unlock()
+			close(done)
+		})
 	}
 	return operationCtx, finish, nil
 }
@@ -347,6 +367,9 @@ func (s *Service) Status(ctx context.Context, input mcpserver.CodingStatusInput)
 	}
 	record.mu.Lock()
 	busy := record.busy
+	activeAction := record.activeAction
+	activeCommand := record.activeCommand
+	activeStartedAt := record.activeStartedAt
 	record.mu.Unlock()
 	state := "ready"
 	if busy {
@@ -357,6 +380,19 @@ func (s *Service) Status(ctx context.Context, input mcpserver.CodingStatusInput)
 		TargetRef: record.targetRef, ResolvedCommit: record.resolvedCommit,
 		CurrentHead: record.currentHead, TrackedDirty: record.trackedDirty,
 		CurrentBranch: record.currentBranch, Detached: record.detached,
+	}
+	if busy {
+		output.ActiveAction = activeAction
+		output.ActiveCommand = activeCommand
+		if !activeStartedAt.IsZero() {
+			output.ActiveStartedAt = activeStartedAt.Format(time.RFC3339Nano)
+			elapsed := time.Since(activeStartedAt)
+			elapsedSeconds := int64(0)
+			if elapsed > 0 {
+				elapsedSeconds = int64(elapsed / time.Second)
+			}
+			output.ActiveElapsedSeconds = &elapsedSeconds
+		}
 	}
 	if busy || s.inspect == nil {
 		return output, nil

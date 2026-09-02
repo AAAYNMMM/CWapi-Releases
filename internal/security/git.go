@@ -329,7 +329,7 @@ func (m *GitSafetyManager) pruneRecoveries(ctx context.Context, gitCWD, recovery
 }
 
 func (m *GitSafetyManager) runGit(ctx context.Context, cwd string, args ...string) (string, int, error) {
-	internalArgs := []string{"-c", "core.hooksPath=" + os.DevNull, "-c", "credential.interactive=never"}
+	internalArgs := []string{"-c", "core.longpaths=true", "-c", "core.hooksPath=" + os.DevNull, "-c", "credential.interactive=never"}
 	internalArgs = append(internalArgs, args...)
 	command := processlaunch.CommandContext(ctx, m.git, internalArgs...)
 	command.Dir = cwd

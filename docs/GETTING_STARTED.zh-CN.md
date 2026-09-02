@@ -11,11 +11,11 @@ Coding：ChatGPT Web -> Secure MCP Tunnel -> Coding MCP -> 本地 Git workspace
 Agent： 本地 OpenAI-compatible 客户端 -> CWapi /v1 -> Agent MCP -> Secure MCP Tunnel -> ChatGPT Web
 ```
 
-## 1. 下载 CWapi 2.0.4
+## 1. 下载 CWapi 2.0.5
 
 下载正式 Windows portable：
 
-[`CWapi-v2.0.4.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.4/CWapi-v2.0.4.zip)
+[`CWapi-v2.0.5.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.5/CWapi-v2.0.5.zip)
 
 完整解压到当前 Windows 用户可写目录，然后运行：
 
@@ -130,9 +130,10 @@ coding_open
 coding_exec
 coding_status
 coding_close
+load_skill
 ```
 
-如果这 4 个工具没出现，先查 [故障排查](TROUBLESHOOTING.zh-CN.md)，不要还没通车就开始研究怎么漂移过弯。
+如果这 5 个工具没出现，先查 [故障排查](TROUBLESHOOTING.zh-CN.md)，不要还没通车就开始研究怎么漂移过弯。
 
 ## 8. 第一次 Coding 测试
 

@@ -30,22 +30,47 @@ func (h *RequestHandle) Wait(ctx context.Context) (RequestResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	duration := time.Until(h.deadline)
-	if duration < 0 {
-		duration = 0
+	for {
+		deadline, ok := h.currentDeadline()
+		if !ok {
+			return RequestResult{}, errors.New("REQUEST_NO_LONGER_ACTIVE")
+		}
+		duration := time.Until(deadline)
+		if duration < 0 {
+			duration = 0
+		}
+		timer := time.NewTimer(duration)
+		select {
+		case <-h.done:
+			timer.Stop()
+			return h.result()
+		case <-ctx.Done():
+			timer.Stop()
+			h.terminateAndForget(StateDisconnected, "AGENT_CLIENT_DISCONNECTED")
+			return RequestResult{}, ctx.Err()
+		case <-timer.C:
+			current, exists := h.currentDeadline()
+			if !exists {
+				return RequestResult{}, errors.New("REQUEST_NO_LONGER_ACTIVE")
+			}
+			if time.Now().Before(current) {
+				continue
+			}
+			h.terminateAndForget(StateTimedOut, "AGENT_REQUEST_TIMEOUT")
+			return RequestResult{}, errors.New("AGENT_REQUEST_TIMEOUT")
+		}
 	}
-	timer := time.NewTimer(duration)
-	defer timer.Stop()
-	select {
-	case <-h.done:
-		return h.result()
-	case <-ctx.Done():
-		h.terminateAndForget(StateDisconnected, "AGENT_CLIENT_DISCONNECTED")
-		return RequestResult{}, ctx.Err()
-	case <-timer.C:
-		h.terminateAndForget(StateTimedOut, "AGENT_REQUEST_TIMEOUT")
-		return RequestResult{}, errors.New("AGENT_REQUEST_TIMEOUT")
+}
+
+func (h *RequestHandle) currentDeadline() (time.Time, bool) {
+	b := h.broker
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	req := b.requests[h.id]
+	if req == nil {
+		return time.Time{}, false
 	}
+	return req.deadline, true
 }
 
 func (h *RequestHandle) result() (RequestResult, error) {
@@ -58,7 +83,7 @@ func (h *RequestHandle) result() (RequestResult, error) {
 	}
 	delete(b.requests, h.id)
 	b.compactQueueLocked(h.id)
-	if req.state != StateCompleted {
+	if req.state != StateCompleted && req.state != StateWaitingTool {
 		if req.errCode == "" {
 			return RequestResult{}, errors.New("AGENT_REQUEST_FAILED")
 		}
@@ -75,12 +100,10 @@ func (h *RequestHandle) terminateAndForget(state, code string) {
 	if req == nil {
 		return
 	}
-	if req.state == StateQueued || req.state == StateClaimed {
+	if isActiveRequestState(req.state) {
 		b.finishLocked(req, state, code, Completion{})
 		b.lastState = state
 	}
-	// If bridge shutdown completed first, the HTTP waiter is still gone. The
-	// terminal result has no consumer, so remove it instead of retaining it.
 	delete(b.requests, h.id)
 	b.compactQueueLocked(h.id)
 }

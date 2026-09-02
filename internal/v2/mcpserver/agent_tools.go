@@ -24,18 +24,35 @@ type AgentOpenOutput struct {
 
 type AgentExchangeResponse struct {
 	RequestID string         `json:"request_id"`
+	Event     string         `json:"event,omitempty"`
 	Response  map[string]any `json:"response"`
+}
+
+type AgentProgress struct {
+	RequestID string `json:"request_id"`
+	Message   string `json:"message"`
 }
 
 type AgentExchangeInput struct {
 	Responses []AgentExchangeResponse `json:"responses,omitempty"`
+	Progress  []AgentProgress         `json:"progress,omitempty"`
 	Capacity  int                     `json:"capacity,omitempty"`
 }
 
+type AgentStructuredError struct {
+	Code       string `json:"code"`
+	Message    string `json:"message"`
+	RequestID  string `json:"request_id,omitempty"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	ToolName   string `json:"tool_name,omitempty"`
+	Retryable  bool   `json:"retryable"`
+}
+
 type AgentExchangeResult struct {
-	RequestID string `json:"request_id,omitempty"`
-	State     string `json:"state"`
-	Error     string `json:"error,omitempty"`
+	RequestID string                `json:"request_id,omitempty"`
+	State     string                `json:"state"`
+	Error     string                `json:"error,omitempty"`
+	Detail    *AgentStructuredError `json:"error_detail,omitempty"`
 }
 
 type AgentExchangeRequest struct {
@@ -43,25 +60,45 @@ type AgentExchangeRequest struct {
 	TaskID          string         `json:"task_id,omitempty"`
 	CorrelationID   string         `json:"correlation_id,omitempty"`
 	State           string         `json:"state"`
+	LifecycleState  string         `json:"lifecycle_state"`
 	Delivery        int            `json:"delivery"`
+	PreviousState   string         `json:"previous_state,omitempty"`
+	ResumeReason    string         `json:"resume_reason,omitempty"`
 	CreatedAt       string         `json:"created_at"`
 	ClaimedAt       string         `json:"claimed_at"`
 	LastDeliveredAt string         `json:"last_delivered_at"`
+	LastActivity    string         `json:"last_activity"`
 	DeadlineAt      string         `json:"deadline_at"`
+	Event           string         `json:"event,omitempty"`
 	Request         map[string]any `json:"request"`
 }
 
+type AgentEvent struct {
+	Type       string `json:"type"`
+	RequestID  string `json:"request_id,omitempty"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	ToolName   string `json:"tool_name,omitempty"`
+	Code       string `json:"code,omitempty"`
+	Message    string `json:"message,omitempty"`
+	Retryable  bool   `json:"retryable,omitempty"`
+	At         string `json:"at"`
+}
+
 type AgentExchangeActivity struct {
-	Revision     uint64 `json:"revision"`
-	Changed      bool   `json:"changed"`
-	Pending      int    `json:"pending"`
-	Inflight     int    `json:"inflight"`
-	Active       int    `json:"active"`
-	IdleCount    int    `json:"idle_count"`
-	WaitedMillis int64  `json:"waited_millis"`
-	LastState    string `json:"last_state,omitempty"`
-	LastError    string `json:"last_error,omitempty"`
-	NextAction   string `json:"next_action"`
+	Revision        uint64 `json:"revision"`
+	Changed         bool   `json:"changed"`
+	Pending         int    `json:"pending"`
+	Inflight        int    `json:"inflight"`
+	Active          int    `json:"active"`
+	QueuedRequests  int    `json:"queued_requests"`
+	ActiveRequests  int    `json:"active_requests"`
+	IdleCount       int    `json:"idle_count"`
+	WaitedMillis    int64  `json:"waited_millis"`
+	LastState       string `json:"last_state,omitempty"`
+	LastError       string `json:"last_error,omitempty"`
+	LastHeartbeatAt string `json:"last_heartbeat_at,omitempty"`
+	LastProgress    string `json:"last_progress,omitempty"`
+	NextAction      string `json:"next_action"`
 }
 
 type AgentExchangeOutput struct {
@@ -69,6 +106,7 @@ type AgentExchangeOutput struct {
 	Activity AgentExchangeActivity  `json:"activity"`
 	Results  []AgentExchangeResult  `json:"results,omitempty"`
 	Requests []AgentExchangeRequest `json:"requests,omitempty"`
+	Events   []AgentEvent           `json:"events,omitempty"`
 }
 
 type AgentCloseInput struct{}
@@ -89,17 +127,16 @@ func RegisterAgent(server *mcp.Server, service AgentService) error {
 	}
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        ToolAgentOpen,
-		Description: "Open or resume the single active Web GPT consumer bridge. The internal bridge generation remains CWapi-owned and is not exposed to Web GPT.",
+		Description: "Open or resume the logical Web GPT bridge. Active request state survives a temporary bridge detach and is redelivered with the same request_id.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, input AgentOpenInput) (*mcp.CallToolResult, AgentOpenOutput, error) {
 		output, err := service.Open(ctx, input)
 		return nil, output, err
 	})
 	mcp.AddTool(server, &mcp.Tool{
 		Name: ToolAgentExchange,
-		Description: "Atomically submit results for a previous batch on CWapi's single active bridge; non-tool terminal responses return immediately as state=responses, while tool_calls keep a bounded wait open for the local tool-result request batch. " +
-			"Process every returned request independently; delivery greater than one is a retry of the same request_id, never a local process session. " +
-			"A no_request result means only that the bounded wait ended with no OpenAI request; inspect activity and do not use it as evidence that local work is running. " +
-			"Function arguments and JSON content may be supplied as native JSON values to avoid nested escaping. File and image transfer are not supported.",
+		Description: "Submit structured completion/tool-call responses and optional progress, then receive queued or resumed requests. " +
+			"delivery greater than one is the same request_id redelivered. Retryable parse/tool errors return error_detail and leave the request recoverable. " +
+			"Heartbeat is runtime-owned; no_request only means the bounded exchange wait produced no request. File and image transfer are not supported.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, input AgentExchangeInput) (*mcp.CallToolResult, AgentExchangeOutput, error) {
 		if input.Capacity < 0 {
 			return nil, AgentExchangeOutput{}, errors.New("AGENT_EXCHANGE_INPUT_INVALID")
@@ -112,7 +149,7 @@ func RegisterAgent(server *mcp.Server, service AgentService) error {
 	})
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        ToolAgentClose,
-		Description: "Close CWapi's current single active Agent bridge and release its broker ownership. No bridge ID is required.",
+		Description: "Detach CWapi's current Agent bridge. Active requests are preserved for resume until they complete, fail finally, disconnect, or expire.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, input AgentCloseInput) (*mcp.CallToolResult, AgentCloseOutput, error) {
 		output, err := service.Close(ctx, input)
 		return nil, output, err

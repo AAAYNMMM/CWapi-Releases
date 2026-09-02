@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-[![Release](https://img.shields.io/github/v/release/AAAYNMMM/chatgpt-work-api-Releases?filter=v2.0.4&style=flat-square&label=Release)](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/tag/v2.0.4)
+[![Release](https://img.shields.io/github/v/release/AAAYNMMM/chatgpt-work-api-Releases?filter=v2.0.5&style=flat-square&label=Release)](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/tag/v2.0.5)
 ![Windows](https://img.shields.io/badge/Windows-11%20x64-0078d4?style=flat-square)
 ![MCP](https://img.shields.io/badge/MCP-Coding%20%2B%20Agent-6f42c1?style=flat-square)
 ![OpenAI compatible](https://img.shields.io/badge/API-OpenAI--compatible-10a37f?style=flat-square)
@@ -14,7 +14,7 @@ CWapi 2.0 提供两条彼此隔离的链路：
 - **Coding**：ChatGPT Web 通过 MCP 操作本地 Git workspace，读取、修改、编译、测试和执行开发命令。
 - **Agent**：CWapi 在 localhost 提供 OpenAI-compatible API，本地软件把模型请求交给 Web GPT，再取得回答或 `tool_calls`。
 
-当前正式版本：**`2.0.4`**。
+当前正式版本：**`2.0.5`**。
 
 ## CWapi 是什么？
 
@@ -32,13 +32,14 @@ CWapi Coding MCP
 Build / Test / Git / Development Tools
 ```
 
-Coding 对外只有 4 个工具：
+Coding 对外只有 5 个工具：
 
 ```text
 coding_open
 coding_exec
 coding_status
 coding_close
+load_skill
 ```
 
 Web GPT 是这条链上**唯一负责推理的 agent**。portable 内置的官方 Codex runtime 只作为 model-free `command/exec` 工具宿主和 Windows sandbox。CWapi 不创建 Codex thread/turn，不把任务交给 Codex Agent 推理，也不要求用户为 Coding 登录 Codex 账号。
@@ -106,8 +107,9 @@ Cline、Roo Code 等允许自定义 OpenAI-compatible provider 的客户端**可
 - 网络访问与 SAFE/FULL 独立；Remote Git Rewrite 是默认关闭的独立能力，用于 direct force/delete remote updates。
 - 可能丢弃本地内容的 direct Git 操作前创建有界 `refs/cwapi/safety/*` 恢复点。
 - `coding_exec` 默认前台执行，也支持 `start/status/stop` persistent process 生命周期。
-- `coding_status` 查看 HEAD、tracking HEAD、dirty 与 divergence。
+- `coding_status` 查看 HEAD、tracking HEAD、dirty 与 divergence；前台命令真实处于 busy 时还会返回 action、executable、开始时间和已运行秒数，但不会回显 argv。
 - 新 ChatGPT 对话通过兼容的 `coding_open(..., resume=true)` 继续同一 active repository。
+- 通过 `load_skill(name)` 按需加载启动时缓存的共享任务 Skill；修改 Core/Rules/Skill 后需要重启 CWapi。
 - 源码和其它可检查文本保持在命令链路中；Coding 不提供文件或图片传输工具。
 
 ### Agent
@@ -125,11 +127,11 @@ Cline、Roo Code 等允许自定义 OpenAI-compatible provider 的客户端**可
 
 ## 5 分钟快速开始
 
-1. 下载 [`CWapi-v2.0.4.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.4/CWapi-v2.0.4.zip)。
+1. 下载 [`CWapi-v2.0.5.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.5/CWapi-v2.0.5.zip)。
 2. 完整解压到当前用户可写目录，运行 `CWapi.exe`。
 3. 要使用 **Coding**，先创建 OpenAI Secure MCP Tunnel，取得 Tunnel ID 与 Runtime API key，再填入 CWapi 的 Coding Tunnel 面板。
 4. 在 ChatGPT 使用支持你所需 MCP 能力的计划/Workspace，按当前 Developer Mode / custom app 流程连接同一个 Tunnel。ChatGPT 不能直接访问 CWapi 的 `127.0.0.1` MCP 地址。
-5. 确认 4 个 Coding 工具出现，再用 `coding_open` + `coding_status` 或只读 `coding_exec` 做第一次仓库测试。
+5. 确认 5 个 Coding 工具出现，再用 `coding_open` + `coding_status` 或只读 `coding_exec` 做第一次仓库测试。
 6. 要使用 **Agent**，再创建第二个独立 Secure MCP Tunnel，填入 Agent Tunnel 面板，并在 ChatGPT 把它作为另一个 MCP app 连接。
 7. 在 Agent 对话中调用 `agent_open`，连续任务期间持续使用 `agent_exchange`。
 8. 本地 OpenAI-compatible 软件填写上面的 Base URL、model 和 GUI 给出的 Agent API key。
@@ -154,7 +156,7 @@ Cline、Roo Code 等允许自定义 OpenAI-compatible provider 的客户端**可
 
 ## 文件与图片
 
-CWapi 2.0.4 的 Coding 与 Agent MCP 都不传输文件或图片。源码、Markdown、JSON、日志等可检查 repository 文本通过有界 `coding_exec` 命令读取。
+CWapi 2.0.5 的 Coding 与 Agent MCP 都不传输文件或图片。源码、Markdown、JSON、日志等可检查 repository 文本通过有界 `coding_exec` 命令读取。
 
 Agent 只接受文本与 tool JSON。顶层 `attachments` 返回 `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`；`image_url` 等非文本 message content 返回 `AGENT_MEDIA_INPUT_UNSUPPORTED`。
 
@@ -200,15 +202,15 @@ CWapi 不建立持久化完整对话 transcript，也不保存完整 command-out
 
 ## 发行路线
 
-- [`main`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/main)：CWapi 2.x，当前正式版本 `2.0.4`。
+- [`main`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/main)：CWapi 2.x，当前正式版本 `2.0.5`。
 - [`1.6.x`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/1.6.x)：CWapi 1.6.x 旧版路线，当前正式版本 `1.6.3`。
 
 ## 开发仓库与发行仓库
 
 当前仓库只放面向发行的干净源码快照、portable Release 和用户文档。完整开发历史、测试、验证/打包自动化和发行工程位于 [`AAAYNMMM/CWapi`](https://github.com/AAAYNMMM/CWapi)。
 
-CWapi 2.0.4 对应开发源码 commit：
+CWapi 2.0.5 对应开发源码 commit：
 
 ```text
-7b5e51725f6f253f957237ce6847e7e2f32f08a1
+176d32e6d3caa6e069f0b73e1ab86c2604ce8915
 ```

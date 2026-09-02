@@ -60,17 +60,21 @@ type CodingStatusInput struct {
 }
 
 type CodingStatusOutput struct {
-	State          string `json:"state"`
-	Repository     string `json:"repository,omitempty"`
-	TargetRef      string `json:"target_ref,omitempty"`
-	ResolvedCommit string `json:"resolved_commit,omitempty"`
-	CurrentHead    string `json:"current_head,omitempty"`
-	CurrentBranch  string `json:"current_branch,omitempty"`
-	Detached       bool   `json:"detached,omitempty"`
-	TrackingHead   string `json:"tracking_head,omitempty"`
-	TrackedDirty   bool   `json:"tracked_dirty,omitempty"`
-	Divergence     string `json:"divergence,omitempty"`
-	LastError      string `json:"last_error,omitempty"`
+	State                string `json:"state"`
+	Repository           string `json:"repository,omitempty"`
+	TargetRef            string `json:"target_ref,omitempty"`
+	ResolvedCommit       string `json:"resolved_commit,omitempty"`
+	CurrentHead          string `json:"current_head,omitempty"`
+	CurrentBranch        string `json:"current_branch,omitempty"`
+	Detached             bool   `json:"detached,omitempty"`
+	TrackingHead         string `json:"tracking_head,omitempty"`
+	TrackedDirty         bool   `json:"tracked_dirty,omitempty"`
+	Divergence           string `json:"divergence,omitempty"`
+	LastError            string `json:"last_error,omitempty"`
+	ActiveAction         string `json:"active_action,omitempty"`
+	ActiveCommand        string `json:"active_command,omitempty"`
+	ActiveStartedAt      string `json:"active_started_at,omitempty"`
+	ActiveElapsedSeconds *int64 `json:"active_elapsed_seconds,omitempty"`
 }
 
 type CodingCloseInput struct {
@@ -128,7 +132,7 @@ func RegisterCoding(server *mcp.Server, service CodingService) error {
 	})
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        ToolCodingStatus,
-		Description: "Return current local Git truth for repository_url's active durable workspace without fetching or invoking a Codex model.",
+		Description: "Return current local Git truth for repository_url's active durable workspace without fetching or invoking a Codex model. While busy, includes the active foreground action, executable, start time and elapsed seconds; argv is intentionally not exposed.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, input CodingStatusInput) (*mcp.CallToolResult, CodingStatusOutput, error) {
 		input.RepositoryURL = strings.TrimSpace(input.RepositoryURL)
 		if input.RepositoryURL == "" {

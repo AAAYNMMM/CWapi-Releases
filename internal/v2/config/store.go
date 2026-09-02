@@ -81,7 +81,6 @@ func migratePrevious(path string) (Config, error) {
 		return Config{}, errors.New("CONFIG_MIGRATION_NOT_APPLICABLE")
 	}
 	cfg.Version = Version
-	cfg.Codex.RemoteGitRewrite = false
 	if err := SaveAtomic(path, cfg); err != nil {
 		return Config{}, err
 	}

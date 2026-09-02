@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -13,40 +14,13 @@ import (
 	"time"
 
 	v2config "github.com/AAAYNMMM/CWapi/internal/v2/config"
+	"github.com/AAAYNMMM/CWapi/internal/v2/promptstore"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
 	SurfaceCoding = "coding"
 	SurfaceAgent  = "agent"
-
-	codingInstructions = `CWapi 2.0.4 Coding operating manual for the current conversation/task. Apply these rules after first contact with this MCP without requiring repeated reminders on every tool call.
-
-- Web GPT is the sole coding agent. CWapi does not use Codex accounts, models, threads, turns, or agent behavior.
-- Start each Coding conversation/task with coding_open. Web GPT never receives or stores a coding session ID. CWapi canonicalizes repository_url and maps that stable repository identity to its internal active session. Reuse the same repository_url throughout the task; compatible coding_open(..., resume=true) resumes the existing internal session, including from a new conversation. A browser/chat conversation ending does not automatically close the CWapi session.
-- Use coding_exec(repository_url, command, argv, ...) for exact development commands. Pass the executable separately from an exact argv array; do not send one shell-quoted command string. Omitted action means the compatible foreground action=run. Use action=start for a persistent command, then bounded action=status/action=stop calls with its process_id; terminal status ends polling.
-- Inspect before editing. Avoid large numbers of fragmented coding_exec round trips. When several reads or searches are independent, prefer one information-rich command or a small number of well-grouped commands instead of many tiny round trips. Do not re-read unchanged files without a reason.
-- File and image transfer are not part of Coding MCP. Read inspectable repository text through coding_exec; do not expect uploads or MCP file/image resources.
-- After edits, run the narrowest useful verification first, then broaden tests when needed. Use coding_status when Git/workspace truth is actually needed and before final handoff rather than after every small step.
-- SAFE is for isolated normal read/edit/test work: workspace-scoped caches and synthetic profiles are reused without inheriting host developer credentials or configuration. FULL gives every command that passes the small permanent catastrophic guard dangerFullAccess and a sanitized host developer environment, including normal Git, GitHub CLI, npm, SDK and hook behavior. Coding network access remains an independent local capability in both profiles.
-- Remote Git Rewrite is a separate advanced capability and defaults off. With it off, direct force/delete push forms are rejected; with it on, only those remote-rewrite forms are added. Catastrophic disk/boot/elevation operations, protected CWapi internal paths, internal executables and unsafe Git transports remain permanently denied. CWapi does not infer script contents by parsing shell text; FULL scripts therefore carry the ambient authority of the local user.
-- Close the Coding session with coding_close(repository_url) when the task is genuinely finished. Closing releases only the active session owner; it does not reset Git, clean files, delete uncommitted work or delete the durable workspace. If a conversation disappears before close, a later conversation should use coding_open(..., resume=true) for that repository.`
-
-	agentInstructions = `CWapi 2.0.4 Agent operating manual for the current conversation/task. Apply these rules after first contact with this MCP without requiring repeated reminders on every exchange.
-
-- Web GPT is the sole planner and decision-maker. CWapi is a deterministic protocol adapter/broker and local software is a tool executor; neither autonomously advances a task after Web GPT stops issuing decisions. Maintain an explicit pending/running/completed-or-failed/verified checklist and advance it when concrete tool output, process exit, or artifact verification changes state.
-- Requests have already passed through CWapi's canonical format and Context Optimizer. Reason over the task, messages, tools and tool results; do not infer client software identity or private protocol state. Preserve every supplied role, tool-call ID and tool-result association in responses.
-- Call agent_open() to open or resume CWapi's single active Agent bridge. Web GPT never receives or stores bridge_id; CWapi retains the internal bridge generation and automatically uses it for agent_exchange and agent_close. Do not close and reopen merely because an exchange returns no_request.
-- Default agent_exchange(capacity=4); if agent_open reports max_inflight below 4, use that smaller capacity. agent_exchange automatically uses the current bridge. Process the full returned batch and correlate every response by its exact request_id; request_id remains mandatory because multiple requests may be in flight at once.
-- Submit all completed responses together in the next agent_exchange. A non-tool terminal response is acknowledged immediately with state=responses; when any response returns tool_calls, that same exchange continues its bounded wait for the local tool-result request. state=no_request is reserved for a real wait timeout. Inspect activity.revision, changed, pending, inflight, idle_count, and next_action instead of inferring progress from message timing.
-- Each returned request is one OpenAI-compatible model request. When one request needs multiple independent third-party function calls and their arguments are already known, return those calls together in the same assistant tool_calls array. Do not split independent calls across extra model turns just to inspect intermediate results. Keep calls sequential only when a later call genuinely depends on an earlier tool result.
-- Tool calls are executed by the third-party software, not by CWapi or this MCP. Use unique tool-call IDs and valid function names. Function arguments may be a valid JSON string or a native JSON object; CWapi canonicalizes native values to the OpenAI-compatible string form. JSON response content may likewise be supplied natively when that avoids JSON-inside-JSON escaping.
-- File and image transfer are not supported by Agent. Local OpenAI-compatible requests must use text/tool JSON only; top-level attachments and non-text message content parts are rejected before broker admission. CWapi does not import ChatGPT conversation uploads into local software.
-- Independent requests in the same batch may be reasoned about together when practical, but correctness must not depend on parallel scheduling.
-- delivery > 1 is redelivery of the same request_id, not new work. request_id identifies an MCP/OpenAI transaction only; never treat it as a third-party command/session ID. Optional local request metadata task_id and correlation_id remain stable only when the local client supplies them.
-- A process/session reported completed or failed is terminal: record the exit/result, stop polling that session, and immediately choose the next pending verification or closeout step. If status delivery is ambiguous, inspect the expected artifact and the actual process state rather than relying on no_request.
-- no_request means only that no new local OpenAI request arrived before this exchange's wait timeout. It never means a local command is still running and is not, by itself, a reason to wait again. Continue only when a separately known active process, external condition, or user-requested monitor exists. After two unchanged idle exchanges, reassess task/process/artifact state before any further wait.
-- A rejected response remains available for correction without rolling back successful siblings. Once all planned steps are terminal and verified, report the result and use agent_close() with no ID.`
 )
 
 type Config = v2config.MCPConfig
@@ -81,6 +55,32 @@ func New(cfg Config, coding Registrar, agent Registrar) (*Runtime, error) {
 	if err := v2config.ValidateMCP(cfg); err != nil {
 		return nil, err
 	}
+	codingEnabled := coding != nil
+	agentEnabled := agent != nil
+	promptRoot, err := promptstore.DiscoverRoot()
+	if err != nil {
+		return nil, err
+	}
+	prompts, warnings, err := promptstore.Load(promptRoot, codingEnabled, agentEnabled)
+	if err != nil {
+		return nil, err
+	}
+	for _, warning := range warnings {
+		log.Printf("[WARN] %s", warning)
+	}
+	codingInstructions, agentInstructions := "", ""
+	if codingEnabled {
+		codingInstructions, err = prompts.Instructions(SurfaceCoding)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if agentEnabled {
+		agentInstructions, err = prompts.Instructions(SurfaceAgent)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	codingServer := mcp.NewServer(
 		&mcp.Implementation{Name: "cwapi-coding", Version: v2config.Version},
@@ -90,16 +90,20 @@ func New(cfg Config, coding Registrar, agent Registrar) (*Runtime, error) {
 		&mcp.Implementation{Name: "cwapi-agent", Version: v2config.Version},
 		&mcp.ServerOptions{Instructions: agentInstructions},
 	)
-	codingEnabled := coding != nil
-	agentEnabled := agent != nil
 	if codingEnabled {
 		if err := coding(codingServer); err != nil {
 			return nil, fmt.Errorf("MCP_CODING_REGISTER_FAILED: %w", err)
+		}
+		if err := registerSkillTool(codingServer, prompts); err != nil {
+			return nil, fmt.Errorf("MCP_CODING_SKILL_REGISTER_FAILED: %w", err)
 		}
 	}
 	if agentEnabled {
 		if err := agent(agentServer); err != nil {
 			return nil, fmt.Errorf("MCP_AGENT_REGISTER_FAILED: %w", err)
+		}
+		if err := registerSkillTool(agentServer, prompts); err != nil {
+			return nil, fmt.Errorf("MCP_AGENT_SKILL_REGISTER_FAILED: %w", err)
 		}
 	}
 

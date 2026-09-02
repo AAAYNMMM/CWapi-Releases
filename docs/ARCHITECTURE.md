@@ -47,7 +47,7 @@ Web GPT
   -> edit/test/commit/push result
 ```
 
-Coding MCP 对外暴露四个工具：`coding_open`、`coding_exec`、`coding_status`、`coding_close`。
+Coding MCP 对外暴露五个工具：`coding_open`、`coding_exec`、`coding_status`、`coding_close`、`load_skill`。
 
 Coding 不提供文件或图片 MCP 传输。文本、源码、JSON、日志等需要的 workspace 内容通过 exact `coding_exec` 获取。
 
@@ -75,30 +75,27 @@ Workspace prepare 使用 local tracking branch，不以 detached HEAD 作为正�
 
 ```text
 local software
-  -> POST 127.0.0.1:<agent-port>/v1/chat/completions
-  -> Bearer API key
-  -> OpenAI Compatible Adapter
-  -> CWapi canonical conversation
-  -> deterministic Context Optimizer
-  -> bounded broker / MCP bridge
-  -> agent_exchange batch claim
-  -> Web GPT
-  -> agent_exchange response -> canonical completion
-  -> OpenAI Compatible Adapter
-  -> OpenAI-compatible JSON or keepalive SSE
+  -> OpenAI-compatible Provider
+  -> Adapter -> canonical conversation -> deterministic optimizer
+  -> Broker request lifecycle + runtime heartbeat
+  -> Agent MCP -> Web GPT
+  -> structured tool_call/completion/error
+  -> local tool result -> next OpenAI request
 ```
 
-Agent 只有一个 active bridge，重复 `agent_open` 会恢复并续租同一 bridge。Web GPT 是本地 Agent 软件实际使用的模型，也是唯一任务规划与决策主体；CWapi 只做协议转换、确定性上下文优化和 bridge/OpenAI request 状态维护，本地软件只执行工具。没有第二个本地推理模型。第三方 command/session 生命周期不属于 broker，不能从 MCP `request_id` 或 `no_request` 推断。
+`internal/v2/agentprotocol` remains the formal external-protocol boundary. 2.0.5 adds stream argument assembly so tool-call argument deltas are accumulated completely before one canonical JSON parse.
 
-`internal/v2/agentprotocol` 是当前正式协议边界：Adapter 将外部协议映射到轻量 canonical message/tool/completion/error/stream 类型；Context Optimizer 删除未映射的客户端私有字段，规范化 metadata、JSON tool result 与可证明重复的 system/developer/tool 状态；bridge codec 再生成稳定的 MCP request，并将 Web GPT response 转回 canonical completion。Broker 不再解析客户端协议。当前注册的是 OpenAI-compatible adapter；接口允许后续增加真实需要的 adapter，但不宣称支持所有 Agent 软件。
+Broker request and bridge lifetimes are separate. Request states include `QUEUED / CLAIMED / RUNNING / WAITING_TOOL / COMPLETED / FAILED_RETRYABLE / FAILED_FINAL`; old pending/inflight/claimed fields remain additive compatibility views. Runtime heartbeat renews active request liveness independently from Web GPT natural-language output and does not masquerade as business progress.
 
-Adapter 能力明确报告 `streaming/tools/parallel_tools=true`、`images/files=false`。不支持的文件、图片或无法关联的 tool result/call 会在协议边界返回稳定错误，不交给 Web GPT 猜测。角色与 tool call ID 在往返转换中保持；unknown fields 默认不会穿过 canonical bridge。当前 SSE 仍是 keepalive 加完成后的 buffered chunks，不伪造 token-level stream，但 canonical `StreamChunk` 与 adapter 双向转换保留未来真实流式扩展点。
+Bridge close/stale detaches active requests instead of final-failing them. Reopen creates/reuses a valid bridge generation, rebinds preserved requests, and redelivers the same `request_id` with `delivery++` plus resume metadata. Operations bound to an old generation remain stale and cannot complete a request through the new generation.
 
-每次 `agent_exchange` 原子提交上一批响应，默认最多 4 个 in-flight；已完成 response 会立即唤醒本地 HTTP request。非-tool-call终态 response 以 `state=responses` 立即向 Web GPT 确认；若任一 response 返回 `tool_calls`，当前 exchange 保持 bounded wait 并可直接领取本地工具执行后产生的 follow-up OpenAI request。只有真实 wait timeout 返回 `no_request`。claimed request 使用相同 request ID 与递增 delivery 至少一次投递。相同响应可幂等重交，不同响应冲突拒绝；一个无效响应不影响同批其他 request。bridge lease 过期、close、client disconnect 与 timeout 都有明确终态和清理，仍在处理的 claimed request 会固定 bridge lease。
+Tool-call parse/mapping errors carry structured retryable identity and move the request to `FAILED_RETRYABLE`; valid corrected responses can continue. Tool calls enter `WAITING_TOOL`, release the current local HTTP waiter, and the local executor's tool result arrives in the subsequent OpenAI request. One tool failure is therefore normal task feedback rather than automatic broker failure.
 
-Broker 维护单调 state revision，并在 exchange output 中返回 changed/pending/inflight/active/idle/waited/last-state/next-action activity。`no_request` 只表示 bounded wait 内没有新 OpenAI request；连续无 transition 的 idle count 为 Web GPT 提供防空转信号。Returned request 还包含 created/claimed/last-delivered/deadline 时间。本地 client 可通过标准 `metadata.task_id` / `metadata.correlation_id` 提供跨 request 稳定关联；CWapi 不凭语言内容伪造 task 或 process 状态。
+A brand-new OpenAI request still requires an active bridge and fails fast with HTTP 503 while offline. This keeps client behavior compatible while allowing already-existing work to survive bridge interruption.
 
-Agent 不提供文件或图片输入通道。Provider 只接受文本与 tool JSON；顶层 `attachments` 以及 message content 中非 `text` part（包括 `image_url`）都在 broker 入队前拒绝，`agent_exchange` 不生成 MCP 文件或图片 content。
+Exchange output separates heartbeat, progress, tool_call, tool_result, completion and error concepts and exposes `queued_requests/active_requests`, heartbeat/progress observations and lifecycle/resume timing alongside legacy activity fields. `no_request` continues to mean only bounded wait timeout without a new local OpenAI request.
+
+Agent accepts text/tool JSON only; files/images remain rejected before broker admission. Current SSE keeps transport keepalive and buffered completion encoding; it does not claim token-level realtime streaming.
 
 ## 启动与重配置
 
@@ -124,6 +121,7 @@ Workspace delete/rebuild 只存在于 Desktop maintenance surface，不暴露给
 ```text
 CWapi.exe
 portable-manifest.json
+prompts/...
 runtime/codex/current/...
 runtime/git/...
 runtime/tunnel/current/tunnel-client.exe

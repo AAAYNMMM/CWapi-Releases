@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.0.5 — 2026-09-02 — Current implementation
+
+2.0.5 聚焦 Agent 长任务可靠性、提示词分层和开发运行时回归：
+
+- Agent request 生命周期扩展为 QUEUED/CLAIMED/RUNNING/WAITING_TOOL/COMPLETED/FAILED_RETRYABLE/FAILED_FINAL，并保留旧 pending/inflight/claimed 字段作为兼容视图；
+- heartbeat 由 CWapi runtime 独立维护，progress/tool_call/tool_result/completion/error 分离；模型自然语言沉默不再等价于 request 死亡；
+- bridge 与 request 生命周期解耦，bridge detach/reopen 后 active request 以相同 request_id、递增 delivery 和 resume metadata 继续；无 bridge 的新 HTTP request 仍快速 503；
+- tool-call parse/mapping error 返回带 request/tool identity 的结构化 retryable error，不再把 request 永久留在 CLAIMED；本地 tool error 可作为正常 tool_result 进入下一轮并最终 completion；
+- OpenAI-compatible function.arguments 保持 native object/JSON string 单次 canonicalize；新增 stream assembler，所有 delta 完整拼接后才做一次 JSON parse，覆盖 Windows path、CRLF、quotes/backslashes、Unicode 与大文本；
+- MCP instructions 从 Go 内置经验拆成全局 `prompts/`：Coding/Agent 独立 Core + Rules，共享 Skills；启动只缓存一次，initial context 只含 Core + Rules + Skill list，按需通过 `load_skill(name)` 载入具体 Skill；
+- portable/candidate/privacy gate 正式携带并审计 `prompts/`，避免开发环境可运行而发布包缺失 prompt resources；
+- 修复开发中实际复现的 2.0.4 Coding foreground owner 残留：终态命令立即释放 busy owner，连续命令不再要求重启，真实并发仍返回 CODING_COMMAND_ACTIVE；
+- `coding_status` 在真实 busy 期间返回 active action/executable/start time/elapsed seconds，帮助区分正常长命令与 stale owner；为避免泄露命令行中的 token 或其它敏感参数，不回显 argv；
+- 修复 CWapi 自身深层 runtime TEMP 下 Windows Git workspace 测试撞 MAX_PATH 的回归夹具，保持生产 durable workspace/hash 不变；
+- config schema 继续为 `cwapi.config.v3`，valid 2.0.4 原子迁移到 2.0.5 并保留现有 Remote Git Rewrite 等用户设置；GUI/package metadata 同步为 2.0.5。
+
+发行包对应开发仓库源码提交：
+
+```text
+176d32e6d3caa6e069f0b73e1ab86c2604ce8915
+```
+
 ## 2.0.4 — 2026-09-02
 
 2.0.4 将 Coding 安全管理从集中式命令特判重构为明确的分层边界：
@@ -18,7 +40,9 @@
 
 ```text
 7b5e51725f6f253f957237ce6847e7e2f32f08a1
-```\n\n## 2.0.3 — 2026-09-01
+```
+
+## 2.0.3 — 2026-09-01
 
 2.0.3 将 Agent 外部协议转换从 broker/runtime 核心中抽离，并建立轻量的正式协议边界：
 

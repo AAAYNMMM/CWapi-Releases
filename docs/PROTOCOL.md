@@ -32,6 +32,7 @@ coding_open
 coding_exec
 coding_status
 coding_close
+load_skill
 ```
 
 ### `coding_open`
@@ -86,7 +87,7 @@ coding_close
 {"repository_url":"https://github.com/owner/repo"}
 ```
 
-返回 `state,repository,target_ref,resolved_commit,current_head,current_branch,detached,tracking_head,tracked_dirty,divergence,last_error`。该操作不 fetch，也不返回 Codex transcript。repository 没有 active session 时返回明确的 not-active 错误。
+返回 `state,repository,target_ref,resolved_commit,current_head,current_branch,detached,tracking_head,tracked_dirty,divergence,last_error`。当 `state=busy` 时额外返回 `active_action,active_command,active_started_at,active_elapsed_seconds`，用于确认当前 foreground operation 是否仍在正常运行。为避免命令参数中的 token、密钥或其它敏感值被状态接口回显，`argv` 不进入 busy metadata。该操作不 fetch，也不返回 Codex transcript。repository 没有 active session 时返回明确的 not-active 错误。
 
 ### `coding_close`
 
@@ -96,71 +97,43 @@ coding_close
 
 关闭该 repository 当前 active internal session owner；active operation 会先被取消并等待收口。该操作不 reset/clean workspace，不删除 durable workspace，也不修改或删除用户未提交内容。没有 active session 时返回幂等友好的 `state=no_active_session`。
 
+### `load_skill`
+
+Coding 与 Agent 共用该工具。输入 Skill ID，返回 CWapi 启动时缓存的全局 Skill 内容；具体 Skill 不会默认塞进 MCP initialization context。修改 `prompts/` 后需要重启 CWapi。
+
 ## Agent tools
+
+Agent MCP 对外暴露 4 个工具：`agent_open`、`agent_exchange`、`agent_close`、`load_skill`。`load_skill` 与 Coding 共用启动时缓存的全局 Skills。
 
 ### `agent_open`
 
-输入 `{}`，返回 `state,resumed,max_inflight,state_revision`。MCP 公共协议不暴露 `bridge_id`。CWapi 内部仍创建唯一 bridge generation；已有 active bridge 时续租并返回 `resumed=true`。`state_revision` 是 broker 内单调递增的真实状态修订号，不是 task、request 或 command session ID。
+输入 `{}`，返回 `state,resumed,max_inflight,state_revision`。公共协议不暴露 `bridge_id`。如果 bridge 已存在则续租；如果 bridge 曾断开但仍有 active request，则创建新的内部 generation 并返回 `resumed=true`，随后同一 request 以原 `request_id` 恢复投递。
 
 ### `agent_exchange`
 
-```json
-{
-  "capacity":4,
-  "responses":[{
-    "request_id":"request_...",
-    "response":{
-      "tool_calls":[{
-        "id":"call_1",
-        "type":"function",
-        "function":{"name":"inspect","arguments":{"path":"C:\\work\\repo"}}
-      }],
-      "finish_reason":"tool_calls"
-    }
-  }]
-}
-```
+输入可同时提交 `responses`、`progress` 与 `capacity`。response 可显式带 `event=tool_call|completion`；省略时 CWapi 根据 canonical completion 推导并保持兼容。
 
-一次调用自动绑定调用开始时的 current internal bridge generation，并先逐项处理 `responses`；没有 active bridge 时返回 `AGENT_BRIDGE_NOT_ACTIVE`。已完成的 response 会立即释放对应本地 HTTP waiter，不会等到 exchange 返回。若所有成功 response 都是非-tool-call终态（`stop/length/content_filter`），exchange 立即返回 `state=responses` acknowledgement；若任一成功或 duplicate response 为 `finish_reason=tool_calls`，当前 exchange 继续 bounded-wait，本地软件执行工具后产生的下一轮 OpenAI request 可被直接返回。只有该 follow-up 等待超时且没有下一批时才返回 `state=no_request`。如果 exchange 期间 bridge 被 close/reopen，旧 operation 不得切换到新 generation。默认和最大 capacity 为 4，单个 request 与总 batch payload 均不得超过 1 MiB。
+每个 returned request 除兼容 `state=claimed` 外，还带 `lifecycle_state`、`delivery`、`previous_state`、`resume_reason`、`last_activity`、created/claimed/last-delivered/deadline 时间和 `event`。`delivery > 1` 永远表示相同 `request_id` 的 redelivery/resume，不是新任务。
 
-Top-level `state` 只有三种正常值：`requests` 表示同时返回了待处理 batch；`responses` 表示本次提交的 response 已处理且没有进入 follow-up wait；`no_request` 表示一次真实 bounded wait 已超时且没有新 request。三者都可同时携带逐项 `results` acknowledgement。
+生命周期至少包括：`QUEUED`、`CLAIMED`、`RUNNING`、`WAITING_TOOL`、`COMPLETED`、`FAILED_RETRYABLE`、`FAILED_FINAL`。heartbeat 由 Broker runtime 自主维护，会延长仍在执行 request 的活动期限，但不伪造业务 revision；`progress` 是独立可选事件，也不是 completion。
 
-`request_id` 继续保留且必须精确关联，因为同一 batch 可有多个独立 request。`agent_exchange` 的 request 项包含 transaction ID、可选 client-supplied task/correlation ID、claimed 状态、delivery 与 created/claimed/last-delivered/deadline 时间，以及原始 OpenAI-compatible request；不会附带文件、resource 或 image content。
+`results[].state` 保持 `completed/duplicate/rejected` 兼容。可恢复的 response/tool-call decode 错误返回 `error_detail`：`code,message,request_id,tool_call_id,tool_name,retryable`，request 转入 `FAILED_RETRYABLE` 并可用相同 ID 修正重投。一个坏 response 不回滚同批其他成功项。
 
-每个成功 output 都带结构化 `activity`：
+`function.arguments` 可为 OpenAI JSON string 或 native JSON object。非流式路径 canonicalize 一次；流式 tool-call delta 必须先按 index 完整拼接 arguments，再只做一次 JSON parse，避免 double parse/double escape。Windows 路径、LF/CRLF、Unicode、引号、反斜杠和大文本均属于正式回归范围。
 
-```json
-{
-  "state":"no_request",
-  "activity":{
-    "revision":12,
-    "changed":false,
-    "pending":0,
-    "inflight":0,
-    "active":0,
-    "idle_count":2,
-    "waited_millis":45001,
-    "last_state":"COMPLETED",
-    "next_action":"reassess_before_waiting"
-  }
-}
-```
+成功 tool call 进入 `WAITING_TOOL` 并立即释放本地 HTTP waiter，使本地软件执行工具并发起下一轮 OpenAI request。工具自身失败作为正常 `tool_result` 回到下一轮，不自动杀死 Agent task。只有结构化 completion 才表示当前 request 完成，不能搜索助手文本中的“完成”等词。
 
-- `revision` 在 bridge/open、enqueue、claim、terminal completion/failure 与 close 等真实 broker transition 时递增；redelivery 本身不伪造新状态；
-- `changed` 表示相对该 bridge 上一次已返回 exchange，revision 是否变化；
-- `pending/inflight/active` 是返回时真实 OpenAI request 数量，不代表第三方进程数；
-- `idle_count` 只在连续 `no_request` 且 revision 未变化时递增，有 request 或真实 transition 时清零；
-- `next_action` 为 `process_requests`、`advance_or_finish` 或 `reassess_before_waiting`，防止模型把消息时序误当成本地进度。
+每个 output 带 `activity`，保留 `pending/inflight/active`，并新增 `queued_requests/active_requests/last_heartbeat_at/last_progress`。`no_request` 的唯一含义仍是本次 bounded wait 内没有新的本地 OpenAI request。
 
-每个 returned request 带 `state=claimed`、`created_at`、`claimed_at`、`last_delivered_at` 与 `deadline_at`。`request_id` 继续保留且必须精确关联，因为同一 batch 可有多个独立 OpenAI request；它绝不是第三方 command/session ID。本地 client 如在 Chat Completions body 的 `metadata` 中提供字符串 `task_id` / `correlation_id`，CWapi 会保留 metadata，并把这两个稳定标识提升到 returned request；未提供时 CWapi 不猜测或伪造 task identity。request 交付只包含 JSON，不附带 MCP file、resource 或 image content。
-
-`results[].state` 为 `completed/duplicate/rejected`；rejected 项带 `error`，不回滚其他项。CLAIMED request 在未完成时以相同 request ID、递增 `delivery` 重投。相同响应的重复提交返回 `duplicate`，不同响应返回 `AGENT_RESPONSE_CONFLICT`。response 可包含合法 `tool_calls`；`function.arguments` 可传 OpenAI 形式的 JSON string，也可直接传 native JSON object，CWapi 会 canonicalize 为 string。`content` 也可传 native JSON value 并序列化为 string。JSON/JSON Schema response contract 会在完成前校验；native/string 两种等价 arguments 使用 canonical fingerprint，避免仅因键顺序或转义形式不同产生假冲突。
-
-`no_request` 的唯一语义是：本次 bounded wait 期间没有新的本地 OpenAI request。它不表示第三方 command 正在运行、不改变任何 command session 状态，也不单独构成再次等待的理由。Web GPT 必须从第三方工具的 process exit/status/output 判断 command 是否终态；明确 completed/failed/PASS/FAIL 后停止 poll 该 command session，并推进下一 pending/verification step。连续两个 unchanged idle output 后，在任何进一步 wait 前必须重新核对 task、process 与 expected artifact 状态。
+bridge 生命周期与 request 生命周期分离。`agent_close` 只 detach 当前 bridge，保留 active request/history/delivery/last activity；重新 `agent_open` 后可继续同一 request。旧 bridge generation 的 operation 仍被拒绝，不能跨 generation 完成 request。新 OpenAI HTTP request 在 bridge 完全离线时仍快速失败 503，不进入等待队列。
 
 ### `agent_close`
 
-输入 `{}`。关闭当前唯一 internal bridge；其 queued/claimed requests 立即失败并释放。没有 active bridge 时返回幂等友好的 `state=no_active_bridge`。
+输入 `{}`。关闭当前 bridge handle，但不删除 active request。没有 active bridge 时返回 `state=no_active_bridge`。
+
+### `load_skill`
+
+输入 `{"name":"debugging"}` 等 Skill ID，返回启动时缓存的 Skill name/description/content。Skill 文件修改后需重启 CWapi。缺失 Skill 返回 `SKILL_NOT_FOUND`。
 
 ## OpenAI-compatible Provider
 
@@ -179,7 +152,7 @@ POST /v1/chat/completions
 
 默认 model 为 `cwapi-web-gpt`。HTTP request body 上限 1 MiB；单个 broker request 与每次 exchange 总 JSON payload 上限为 1 MiB。最大 active queue 16；默认整体 timeout 180 秒。没有 bridge 返回 503 `AGENT_BRIDGE_UNAVAILABLE`，queue 满返回 429 `AGENT_BUSY`，timeout 返回 504 `AGENT_REQUEST_TIMEOUT`。
 
-2.0.4 的 Provider 不把外部 JSON 直接交给 broker。正式转换链是：
+2.0.5 的 Provider 不把外部 JSON 直接交给 broker。正式转换链是：
 
 ```text
 local Agent software
@@ -202,7 +175,7 @@ Provider 接受标准顶层 `metadata` object（最多 32 项；key 最长 64 �
 
 ## File and media transport boundary
 
-CWapi 2.0.4 不提供文件或图片传输。
+CWapi 2.0.5 不提供文件或图片传输。
 
 ### Coding
 

@@ -11,11 +11,11 @@ Coding: ChatGPT Web -> Secure MCP Tunnel -> Coding MCP -> local Git workspace
 Agent:  local OpenAI-compatible client -> CWapi /v1 -> Agent MCP -> Secure MCP Tunnel -> ChatGPT Web
 ```
 
-## 1. Download CWapi 2.0.4
+## 1. Download CWapi 2.0.5
 
 Download the official Windows portable:
 
-[`CWapi-v2.0.4.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.4/CWapi-v2.0.4.zip)
+[`CWapi-v2.0.5.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.5/CWapi-v2.0.5.zip)
 
 Fully extract the ZIP into a directory your Windows user can write to. Do not run `CWapi.exe` from inside the ZIP and do not copy only the executable; the portable includes pinned Git, Codex toolhost, and tunnel runtime files beside it.
 
@@ -128,6 +128,7 @@ coding_open
 coding_exec
 coding_status
 coding_close
+load_skill
 ```
 
 If those tools do not appear, stop there and use [Troubleshooting](TROUBLESHOOTING.md). There is little value in heroically debugging a repository before the transport exists.

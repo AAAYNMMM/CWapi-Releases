@@ -1,8 +1,8 @@
-# CWapi 2.0.4 Operations
+# CWapi 2.0.5 Operations
 
 ## Start
 
-Extract the portable to any user-writable directory and run `CWapi.exe`. No Go, Node, Git or Wails installation is required. The first launch creates `CWapi-data/config/cwapi.json` and starts the loopback MCP listener plus the Agent Provider when enabled. Each bundled OpenAI Secure MCP Tunnel starts only after its own configuration is complete.
+Extract the portable to any user-writable directory and run `CWapi.exe`. No Go, Node, Git or Wails installation is required. The first launch creates `CWapi-data/config/cwapi.json` and starts the loopback MCP listener plus the Agent Provider when enabled. 2.0.5 also loads the global `prompts/` directory once at startup; prompt/rule/skill edits require restarting CWapi. Each bundled OpenAI Secure MCP Tunnel starts only after its own configuration is complete.
 
 Coding uses the bundled Codex app-server only for model-free `command/exec` and creates a private empty CODEX_HOME per command. No Codex login is needed. SAFE does not inherit the host Git/GitHub setup. FULL uses the current user's sanitized development environment. GitHub CLI state is shared by all Coding workspaces at `CWapi-data/auth/github`; authenticate once with `gh auth login` and keep token storage in Windows Credential Manager/keyring where supported.
 
@@ -42,7 +42,7 @@ Model:    cwapi-web-gpt
 
 ## Images and files
 
-CWapi 2.0.4 does not provide file or image transfer.
+CWapi 2.0.5 does not provide file or image transfer.
 
 For Coding, read source, Markdown, JSON, logs and other inspectable text through bounded `coding_exec`; there is no attachment tool.
 

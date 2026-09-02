@@ -8,7 +8,7 @@
 
 **现象**
 
-Coding app 没有出现 `coding_open` / `coding_exec` / `coding_status` / `coding_close`，或者 Agent app 没有出现 `agent_open` / `agent_exchange` / `agent_close`。
+Coding app 没有出现 `coding_open` / `coding_exec` / `coding_status` / `coding_close` / `load_skill`，或者 Agent app 没有出现 `agent_open` / `agent_exchange` / `agent_close`。
 
 **可能原因**
 
@@ -131,7 +131,7 @@ portable 只复制了一部分、runtime 文件缺失，或者安全软件隔离
 
 **怎么修**
 
-把正式 `CWapi-v2.0.4.zip` 完整重新解压到一个干净、当前用户可写目录。不要随便拿另一个 Codex 安装去替换 bundled runtime。
+把正式 `CWapi-v2.0.5.zip` 完整重新解压到一个干净、当前用户可写目录。不要随便拿另一个 Codex 安装去替换 bundled runtime。
 
 ## private Git clone/fetch/push 失败
 
@@ -198,11 +198,11 @@ ChatGPT Coding app 显示 5 个工具，或仍列出 `coding_attachment`。
 
 **可能原因**
 
-当前连接的是旧版 server/catalog，而不是 CWapi 2.0.4 的 Coding route。
+当前连接的是旧版 server/catalog，而不是 CWapi 2.0.5 的 Coding route。
 
 **怎么修**
 
-确认 CWapi 2.0.4 和 Coding Tunnel 正在运行，重新连接 Coding app，并核对准确的 4 工具 catalog。Coding MCP 已不再传输文件或图片。
+确认 CWapi 2.0.5 和 Coding Tunnel 正在运行，重新连接 Coding app，并核对准确的 5 工具 catalog。Coding MCP 已不再传输文件或图片。
 
 ## `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`
 

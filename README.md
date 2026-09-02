@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-[![Release](https://img.shields.io/github/v/release/AAAYNMMM/chatgpt-work-api-Releases?filter=v2.0.4&style=flat-square&label=Release)](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/tag/v2.0.4)
+[![Release](https://img.shields.io/github/v/release/AAAYNMMM/chatgpt-work-api-Releases?filter=v2.0.5&style=flat-square&label=Release)](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/tag/v2.0.5)
 ![Windows](https://img.shields.io/badge/Windows-11%20x64-0078d4?style=flat-square)
 ![MCP](https://img.shields.io/badge/MCP-Coding%20%2B%20Agent-6f42c1?style=flat-square)
 ![OpenAI compatible](https://img.shields.io/badge/API-OpenAI--compatible-10a37f?style=flat-square)
@@ -14,7 +14,7 @@ CWapi 2.0 provides two isolated bridges:
 - **Coding** lets ChatGPT Web read, edit, build, test, and operate a local Git workspace through MCP.
 - **Agent** exposes a localhost OpenAI-compatible API so compatible local software can send model requests to Web GPT through an Agent MCP bridge.
 
-Current release: **`2.0.4`**.
+Current release: **`2.0.5`**.
 
 ## What is CWapi?
 
@@ -39,6 +39,7 @@ coding_open
 coding_exec
 coding_status
 coding_close
+load_skill
 ```
 
 Web GPT is the **only reasoning agent** in this chain. The bundled official Codex runtime is used only as a model-free `command/exec` toolhost and Windows sandbox. CWapi does **not** create a Codex thread or turn, does not hand the task to Codex Agent, and does not require a Codex account/login for Coding.
@@ -106,8 +107,9 @@ The two lines are not configuration-compatible. Read the [Version Guide](docs/VE
 - Keep network access independent from SAFE/FULL, with Remote Git Rewrite as a separate default-off capability for direct force/delete remote updates.
 - Create bounded `refs/cwapi/safety/*` recovery refs before direct local Git operations likely to discard content.
 - Use `coding_exec` foreground mode by default or the `start/status/stop` persistent-process lifecycle when needed.
-- Inspect HEAD, tracking HEAD, dirty state, and divergence with `coding_status`.
+- Inspect HEAD, tracking HEAD, dirty state, and divergence with `coding_status`; while a foreground command is genuinely busy, status also reports its action, executable, start time, and elapsed seconds without echoing argv.
 - Resume the same active repository from a new ChatGPT conversation with compatible `coding_open(..., resume=true)`.
+- Load startup-cached shared task Skills on demand with `load_skill(name)`; Core/Rules/Skill changes take effect after restarting CWapi.
 - Keep source and other inspectable text in the command path; Coding exposes no file or image transfer tool.
 
 ### Agent capabilities
@@ -116,6 +118,7 @@ The two lines are not configuration-compatible. Read the [Version Guide](docs/VE
 - Chat Completions request/response and streaming support.
 - Function/tool-call responses returned to the local client for that client to execute.
 - Multiple independent requests correlated by exact `request_id`.
+- Long-running Agent requests keep explicit lifecycle state and can resume/redeliver the same `request_id` after a bridge interruption.
 - Bounded queue and request timeout.
 - Structured exchange activity with monotonic revision, queue counts, idle tracking, wait duration, and next-action guidance.
 - Terminal responses are acknowledged as `state=responses`; `no_request` means only that a real bounded wait expired without a new OpenAI request.
@@ -125,7 +128,7 @@ The two lines are not configuration-compatible. Read the [Version Guide](docs/VE
 
 ## 5-minute quick start
 
-1. Download [`CWapi-v2.0.4.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.4/CWapi-v2.0.4.zip).
+1. Download [`CWapi-v2.0.5.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.5/CWapi-v2.0.5.zip).
 2. Fully extract it to a user-writable directory and run `CWapi.exe`.
 3. For **Coding**, create an OpenAI Secure MCP Tunnel, obtain its Tunnel ID and Runtime API key, then enter them in the Coding Tunnel panel.
 4. In ChatGPT, use a workspace/plan that supports the MCP capabilities you need, enable the applicable Developer Mode/custom-app flow, and connect the matching Tunnel. ChatGPT cannot directly connect to CWapi's `127.0.0.1` MCP URL.
@@ -154,7 +157,7 @@ If you move the **entire** extracted CWapi directory, its adjacent `CWapi-data` 
 
 ## Files and images
 
-CWapi 2.0.4 does not transfer files or images through Coding or Agent MCP. Source, Markdown, JSON, logs, and other inspectable repository text are read with bounded `coding_exec` commands.
+CWapi 2.0.5 does not transfer files or images through Coding or Agent MCP. Source, Markdown, JSON, logs, and other inspectable repository text are read with bounded `coding_exec` commands.
 
 Agent accepts text and tool JSON only. Top-level `attachments` is rejected with `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`; non-text message content such as `image_url` is rejected with `AGENT_MEDIA_INPUT_UNSUPPORTED`.
 
@@ -200,15 +203,15 @@ Read [Security](docs/SECURITY.md) for the detailed boundary.
 
 ## Release tracks
 
-- [`main`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/main): CWapi 2.x, current release `2.0.4`.
+- [`main`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/main): CWapi 2.x, current release `2.0.5`.
 - [`1.6.x`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/1.6.x): CWapi 1.6.x legacy line, current release `1.6.3`.
 
 ## Development repository vs release repository
 
 This repository contains clean release-facing source snapshots, portable releases, and user documentation. Development history, tests, validation/package automation, and release engineering live in [`AAAYNMMM/CWapi`](https://github.com/AAAYNMMM/CWapi).
 
-CWapi 2.0.4 was built from development commit:
+CWapi 2.0.5 was built from development commit:
 
 ```text
-7b5e51725f6f253f957237ce6847e7e2f32f08a1
+176d32e6d3caa6e069f0b73e1ab86c2604ce8915
 ```

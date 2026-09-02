@@ -1,4 +1,4 @@
-# CWapi 2.0.4 Security
+# CWapi 2.0.5 Security
 
 ## Trust boundaries
 
@@ -38,7 +38,9 @@ CWapi-owned GitHub CLI identity uses `CWapi-data/auth/github` for every Coding w
 - active queue hard limit 16；
 - internal bridge IDs remain random and generation-scoped; public `request_id` remains random and exact-correlated；
 - `request_id` is transaction-only and is never promoted to third-party command/session identity；optional `metadata.task_id` / `metadata.correlation_id` is bounded and client-supplied；
-- stale lease, timeout, disconnect and close terminalize requests once；
+- request timeout/disconnect terminalize request state；bridge close/stale detaches active requests for same-ID resume rather than deleting them；
+- runtime-owned heartbeat maintains active request liveness independently from natural-language model output；
+- retryable tool-call decode/mapping errors expose structured request/tool identity and remain recoverable；
 - malformed messages/tools/responses are rejected before delivery；
 - exchange activity reports only broker revision and queue truth；`no_request` never asserts external process state；
 - top-level `attachments` is rejected with `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`；

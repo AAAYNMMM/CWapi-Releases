@@ -35,7 +35,7 @@ A safer migration is:
 
 ```text
 C:\Tools\CWapi-1.6.3\...
-C:\Tools\CWapi-2.0.4\...
+C:\Tools\CWapi-2.0.5\...
 ```
 
 Keep both extracted directories separate while testing 2.0. They can coexist because each portable directory has its own adjacent data root.
@@ -76,6 +76,7 @@ coding_open
 coding_exec
 coding_status
 coding_close
+load_skill
 ```
 
 Web GPT is the only reasoning agent. The bundled Codex runtime is a model-free command/exec toolhost, not a second agent.
@@ -151,7 +152,7 @@ Do not manually transplant old credential files into the new installation.
 
 1. **Finish or preserve important 1.6.3 work.** Commit/push important repository work where appropriate and make a separate backup of anything that must not be lost.
 2. **Leave 1.6.3 installed.** Do not modify the working 1.6.x directory yet.
-3. **Download and fully extract 2.0.4** into a different user-writable directory: [`CWapi-v2.0.4.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.4/CWapi-v2.0.4.zip).
+3. **Download and fully extract 2.0.5** into a different user-writable directory: [`CWapi-v2.0.5.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.5/CWapi-v2.0.5.zip).
 4. **Run CWapi 2.0 once** so it creates its own `CWapi-data` and v3 configuration.
 5. **Configure Coding** if needed: create a Coding Secure MCP Tunnel and save its Tunnel ID/Runtime API key through the Coding panel.
 6. **Connect the Coding app in ChatGPT** through that Tunnel and confirm the exact four `coding_*` tools appear.
