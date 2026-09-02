@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-[![Release](https://img.shields.io/github/v/release/AAAYNMMM/chatgpt-work-api-Releases?filter=v2.0.3&style=flat-square&label=Release)](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/tag/v2.0.3)
+[![Release](https://img.shields.io/github/v/release/AAAYNMMM/chatgpt-work-api-Releases?filter=v2.0.4&style=flat-square&label=Release)](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/tag/v2.0.4)
 ![Windows](https://img.shields.io/badge/Windows-11%20x64-0078d4?style=flat-square)
 ![MCP](https://img.shields.io/badge/MCP-Coding%20%2B%20Agent-6f42c1?style=flat-square)
 ![OpenAI compatible](https://img.shields.io/badge/API-OpenAI--compatible-10a37f?style=flat-square)
@@ -14,7 +14,7 @@ CWapi 2.0 提供两条彼此隔离的链路：
 - **Coding**：ChatGPT Web 通过 MCP 操作本地 Git workspace，读取、修改、编译、测试和执行开发命令。
 - **Agent**：CWapi 在 localhost 提供 OpenAI-compatible API，本地软件把模型请求交给 Web GPT，再取得回答或 `tool_calls`。
 
-当前正式版本：**`2.0.3`**。
+当前正式版本：**`2.0.4`**。
 
 ## CWapi 是什么？
 
@@ -79,7 +79,7 @@ Cline、Roo Code 等允许自定义 OpenAI-compatible provider 的客户端**可
 - 让 Web GPT 针对真实本地 Git 项目工作。
 - 读取、搜索、修改源码并执行精确命令，不把 Coding 任务再转给第二个 AI agent。
 - durable workspace 可以跨 ChatGPT 对话继续同一个仓库任务。
-- 普通开发保持 `SAFE`，只有用户明确授权、需要 `.git` metadata 写入或更高本机权限时再切 `FULL`。
+- 普通 workspace 开发保持 `SAFE`；只有确实需要当前 Windows 用户更完整的开发环境时才切换 `FULL`。
 - 给本地 OpenAI-compatible 软件提供一个由 Web GPT 驱动的 localhost 模型入口。
 - Coding 与 Agent 真正隔离：不同 MCP token、不同 tool catalog、不同 Tunnel 配置和 runtime path。
 - Coding 与 Agent 均关闭文件/图片传输；需要检查的 repository 文本通过有界 `coding_exec` 命令读取。
@@ -103,6 +103,9 @@ Cline、Roo Code 等允许自定义 OpenAI-compatible provider 的客户端**可
 - 通过精确命令读取、搜索源码。
 - 在受管 workspace 中修改项目文件。
 - 运行编译器、测试、脚本、localhost 服务和 Git 命令。
+- 网络访问与 SAFE/FULL 独立；Remote Git Rewrite 是默认关闭的独立能力，用于 direct force/delete remote updates。
+- 可能丢弃本地内容的 direct Git 操作前创建有界 `refs/cwapi/safety/*` 恢复点。
+- `coding_exec` 默认前台执行，也支持 `start/status/stop` persistent process 生命周期。
 - `coding_status` 查看 HEAD、tracking HEAD、dirty 与 divergence。
 - 新 ChatGPT 对话通过兼容的 `coding_open(..., resume=true)` 继续同一 active repository。
 - 源码和其它可检查文本保持在命令链路中；Coding 不提供文件或图片传输工具。
@@ -122,7 +125,7 @@ Cline、Roo Code 等允许自定义 OpenAI-compatible provider 的客户端**可
 
 ## 5 分钟快速开始
 
-1. 下载 [`CWapi-v2.0.3.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.3/CWapi-v2.0.3.zip)。
+1. 下载 [`CWapi-v2.0.4.zip`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/releases/download/v2.0.4/CWapi-v2.0.4.zip)。
 2. 完整解压到当前用户可写目录，运行 `CWapi.exe`。
 3. 要使用 **Coding**，先创建 OpenAI Secure MCP Tunnel，取得 Tunnel ID 与 Runtime API key，再填入 CWapi 的 Coding Tunnel 面板。
 4. 在 ChatGPT 使用支持你所需 MCP 能力的计划/Workspace，按当前 Developer Mode / custom app 流程连接同一个 Tunnel。ChatGPT 不能直接访问 CWapi 的 `127.0.0.1` MCP 地址。
@@ -135,9 +138,11 @@ Cline、Roo Code 等允许自定义 OpenAI-compatible provider 的客户端**可
 
 ## SAFE 与 FULL
 
-`SAFE` 用于日常源码读取、修改、build 和 test，底层使用 Codex sandbox 的 workspace-write profile，并保护 `.git` metadata。
+`SAFE` 用于日常源码读取、修改、build 和 test，底层使用 Codex `workspaceWrite`、合成用户 profile、隔离的 Git/包管理器配置，以及位于 `CWapi-data` 的 workspace 级缓存。
 
-`FULL` 只用于用户已经明确授权、确实需要 Git metadata 写入或更广本机权限的操作，例如本机 commit/push。权限切换影响下一条 `coding_exec`；已经运行中的命令继续使用启动时的 profile。永久 execution policy 仍然有效。
+`FULL` 会把通过 Permanent Safety Guard 的命令映射到 `dangerFullAccess`，从当前 Windows 用户开发环境开始，只剥离 CWapi/OpenAI/Codex 内部 secret。正常 Git 配置、credential helper、SSH、签名/hooks、包管理器和 SDK 环境可继续使用。
+
+网络访问与 SAFE/FULL 独立且默认关闭。**Remote Git Rewrite** 也是默认关闭的独立能力：关闭时拒绝 direct force/delete push；开启后也不会绕过危险 transport、receive-pack 注入、CWapi 自保护或自动提权保护。
 
 ## Durable workspace
 
@@ -149,7 +154,7 @@ Cline、Roo Code 等允许自定义 OpenAI-compatible provider 的客户端**可
 
 ## 文件与图片
 
-CWapi 2.0.3 的 Coding 与 Agent MCP 都不传输文件或图片。源码、Markdown、JSON、日志等可检查 repository 文本通过有界 `coding_exec` 命令读取。
+CWapi 2.0.4 的 Coding 与 Agent MCP 都不传输文件或图片。源码、Markdown、JSON、日志等可检查 repository 文本通过有界 `coding_exec` 命令读取。
 
 Agent 只接受文本与 tool JSON。顶层 `attachments` 返回 `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`；`image_url` 等非文本 message content 返回 `AGENT_MEDIA_INPUT_UNSUPPORTED`。
 
@@ -195,15 +200,15 @@ CWapi 不建立持久化完整对话 transcript，也不保存完整 command-out
 
 ## 发行路线
 
-- [`main`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/main)：CWapi 2.x，当前正式版本 `2.0.3`。
+- [`main`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/main)：CWapi 2.x，当前正式版本 `2.0.4`。
 - [`1.6.x`](https://github.com/AAAYNMMM/chatgpt-work-api-Releases/tree/1.6.x)：CWapi 1.6.x 旧版路线，当前正式版本 `1.6.3`。
 
 ## 开发仓库与发行仓库
 
 当前仓库只放面向发行的干净源码快照、portable Release 和用户文档。完整开发历史、测试、验证/打包自动化和发行工程位于 [`AAAYNMMM/CWapi`](https://github.com/AAAYNMMM/CWapi)。
 
-CWapi 2.0.3 对应开发源码 commit：
+CWapi 2.0.4 对应开发源码 commit：
 
 ```text
-8941aa5d41768993c01e7798678a485f56331691
+7b5e51725f6f253f957237ce6847e7e2f32f08a1
 ```

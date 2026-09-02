@@ -20,6 +20,7 @@ type CommandSpec struct {
 	Argv          []string
 	CWD           string
 	WritableRoot  string
+	WritableRoots []string
 	Environment   []string
 	Sandbox       string
 	NetworkAccess bool
@@ -52,6 +53,15 @@ func (h *CommandHandle) Done() <-chan CommandResult {
 		return nil
 	}
 	return h.done
+}
+
+// PID is the owned private app-server process for this command. The user
+// command remains a child in the same managed process tree.
+func (h *CommandHandle) PID() int {
+	if h == nil || h.client == nil || h.client.cmd == nil || h.client.cmd.Process == nil {
+		return 0
+	}
+	return h.client.cmd.Process.Pid
 }
 
 func (h *CommandHandle) Stop() error {
@@ -230,12 +240,26 @@ func commandParams(spec CommandSpec) map[string]any {
 	for _, key := range []string{"CODEX_HOME", "RUST_LOG", "LOG_FORMAT"} {
 		environment[key] = nil
 	}
+	writableRoots := make([]string, 0, len(spec.WritableRoots)+1)
+	writableRoots = append(writableRoots, spec.WritableRoot)
+	for _, root := range spec.WritableRoots {
+		duplicate := false
+		for _, existing := range writableRoots {
+			if strings.EqualFold(filepath.Clean(existing), filepath.Clean(root)) {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			writableRoots = append(writableRoots, root)
+		}
+	}
 	sandboxPolicy := map[string]any{
-		"type": "workspaceWrite", "writableRoots": []string{spec.WritableRoot},
+		"type": "workspaceWrite", "writableRoots": writableRoots,
 		"networkAccess": spec.NetworkAccess, "excludeSlashTmp": true, "excludeTmpdirEnvVar": true,
 	}
 	if spec.Sandbox == CommandSandboxFullAccess {
-		sandboxPolicy = map[string]any{"type": "dangerFullAccess"}
+		sandboxPolicy = map[string]any{"type": "dangerFullAccess", "networkAccess": spec.NetworkAccess}
 	}
 	return map[string]any{
 		"command":        command,
@@ -279,6 +303,11 @@ func validateCommandSpec(spec CommandSpec) error {
 		return errors.New("CODEX_COMMAND_PROCESS_ID_INVALID")
 	}
 	for _, path := range []string{spec.Executable, spec.CWD, spec.WritableRoot} {
+		if !filepath.IsAbs(path) {
+			return errors.New("CODEX_COMMAND_PATH_INVALID")
+		}
+	}
+	for _, path := range spec.WritableRoots {
 		if !filepath.IsAbs(path) {
 			return errors.New("CODEX_COMMAND_PATH_INVALID")
 		}

@@ -15,33 +15,44 @@ import (
 
 	"github.com/AAAYNMMM/CWapi/internal/childenv"
 	"github.com/AAAYNMMM/CWapi/internal/codex"
-	"github.com/AAAYNMMM/CWapi/internal/executionpolicy"
 	"github.com/AAAYNMMM/CWapi/internal/invocation"
 	"github.com/AAAYNMMM/CWapi/internal/processcontract"
+	"github.com/AAAYNMMM/CWapi/internal/security"
 	v2config "github.com/AAAYNMMM/CWapi/internal/v2/config"
 )
 
 const (
-	defaultTimeout = 120 * time.Second
-	maxTimeout     = 600 * time.Second
-	maxOutputBytes = 64 * 1024
+	defaultTimeout         = 120 * time.Second
+	maxTimeout             = 600 * time.Second
+	maxOutputBytes         = 64 * 1024
+	maxPersistentProcesses = 16
+	maxPersistentRecords   = 64
 )
 
 // Host is a model-free bridge to the private Codex app-server command/exec
 // development tool. It does not create Codex threads or turns and therefore
 // does not use Codex account or model functionality.
 type Host struct {
-	service  *codex.Service
-	resolver *invocation.Resolver
-	dataRoot string
-	git      string
+	service              *codex.Service
+	resolver             *invocation.Resolver
+	dataRoot             string
+	git                  string
+	gitSafety            *security.GitSafetyManager
+	protectedExecutables []string
 
-	policyMu      sync.RWMutex
-	accessProfile string
-	networkAccess bool
+	policyMu         sync.RWMutex
+	accessProfile    string
+	networkAccess    bool
+	remoteGitRewrite bool
+
+	processMu sync.RWMutex
+	processes map[string]*persistentProcess
+	closed    bool
 }
 
 type ExecInput struct {
+	Action         string
+	ProcessID      string
 	Command        string
 	Argv           []string
 	CWD            string
@@ -50,10 +61,30 @@ type ExecInput struct {
 
 type ExecResult struct {
 	State     string
+	ProcessID string
+	PID       int
+	StartedAt string
 	ExitCode  int
 	Stdout    string
 	Stderr    string
 	Truncated bool
+}
+
+type persistentProcess struct {
+	mu sync.RWMutex
+
+	id            string
+	pid           int
+	workspace     string
+	command       string
+	argv          []string
+	startedAt     time.Time
+	state         string
+	result        ExecResult
+	handle        *codex.CommandHandle
+	runtime       *security.CommandRuntime
+	done          chan struct{}
+	stopRequested bool
 }
 
 func New(dataRoot string, cfg v2config.CodexConfig) (*Host, error) {
@@ -83,9 +114,14 @@ func New(dataRoot string, cfg v2config.CodexConfig) (*Host, error) {
 	if err != nil {
 		return nil, fmt.Errorf("CODEX_TOOLHOST_GIT_UNAVAILABLE: %w", err)
 	}
+	appExecutable, _ := os.Executable()
+	appRoot := filepath.Dir(filepath.Clean(dataRoot))
 	return &Host{
 		service: service, resolver: resolver, dataRoot: filepath.Clean(dataRoot), git: gitExecutable,
-		accessProfile: cfg.AccessProfile, networkAccess: cfg.NetworkAccess,
+		gitSafety:            security.NewGitSafetyManager(gitExecutable, filepath.Clean(dataRoot)),
+		protectedExecutables: []string{snapshot.ExecutablePath, appExecutable, filepath.Join(appRoot, "runtime", "tunnel", "current", "tunnel-client.exe")},
+		accessProfile:        cfg.AccessProfile, networkAccess: cfg.NetworkAccess, remoteGitRewrite: cfg.RemoteGitRewrite,
+		processes: make(map[string]*persistentProcess),
 	}, nil
 }
 
@@ -113,10 +149,20 @@ func (h *Host) SetNetworkAccess(allowed bool) error {
 	return nil
 }
 
-func (h *Host) currentPolicy() (string, bool) {
+func (h *Host) SetRemoteGitRewrite(allowed bool) error {
+	if h == nil {
+		return errors.New("CODEX_TOOLHOST_UNAVAILABLE")
+	}
+	h.policyMu.Lock()
+	h.remoteGitRewrite = allowed
+	h.policyMu.Unlock()
+	return nil
+}
+
+func (h *Host) currentPolicy() (string, bool, bool) {
 	h.policyMu.RLock()
 	defer h.policyMu.RUnlock()
-	return h.accessProfile, h.networkAccess
+	return h.accessProfile, h.networkAccess, h.remoteGitRewrite
 }
 
 func (h *Host) Exec(ctx context.Context, workspaceRoot string, input ExecInput) (ExecResult, error) {
@@ -127,80 +173,313 @@ func (h *Host) Exec(ctx context.Context, workspaceRoot string, input ExecInput) 
 	if workspaceRoot == "" || !filepath.IsAbs(workspaceRoot) {
 		return ExecResult{}, errors.New("CODEX_TOOLHOST_WORKSPACE_INVALID")
 	}
+	action := strings.ToLower(strings.TrimSpace(input.Action))
+	if action == "" {
+		action = "run"
+	}
+	h.processMu.RLock()
+	closed := h.closed
+	h.processMu.RUnlock()
+	if closed && (action == "run" || action == "start") {
+		return ExecResult{}, errors.New("CODEX_TOOLHOST_CLOSED")
+	}
+	switch action {
+	case "run", "start":
+		return h.execute(ctx, filepath.Clean(workspaceRoot), input, action == "start")
+	case "status":
+		return h.persistentStatus(filepath.Clean(workspaceRoot), input.ProcessID)
+	case "stop":
+		return h.stopPersistent(ctx, filepath.Clean(workspaceRoot), input.ProcessID)
+	default:
+		return ExecResult{}, errors.New("CODING_EXEC_ACTION_INVALID")
+	}
+}
+
+func (h *Host) execute(ctx context.Context, workspaceRoot string, input ExecInput, persistent bool) (ExecResult, error) {
+	if persistent && input.TimeoutSeconds != 0 {
+		return ExecResult{}, errors.New("CODING_PERSISTENT_TIMEOUT_UNSUPPORTED")
+	}
 	arguments, err := decodeArguments(input)
 	if err != nil {
 		return ExecResult{}, err
 	}
-	final, err := h.resolver.Resolve(filepath.Clean(workspaceRoot), arguments)
-	if err != nil {
-		return ExecResult{}, err
-	}
-	if final.BridgeCreated {
-		defer func() { _ = os.Remove(final.BridgePath) }()
-	}
-	profile, networkAccess := h.currentPolicy()
-	policyInvocation := executionpolicy.Invocation{
-		Executable: final.TargetExecutable, Argv: final.TargetArgv, CWD: final.CWD, AccessProfile: profile,
-		TrustedGitExecutable: h.git,
-	}
-	if err := executionpolicy.Check(policyInvocation, filepath.Clean(workspaceRoot), h.dataRoot); err != nil {
-		return ExecResult{}, err
-	}
-	sandbox := codex.CommandSandboxWorkspaceWrite
-	if executionpolicy.RequiresFullAccess(policyInvocation) {
-		sandbox = codex.CommandSandboxFullAccess
-	}
-	if executionpolicy.AllowsHostGitCredentials(policyInvocation) && !networkAccess {
-		return ExecResult{}, errors.New("CODING_NETWORK_ACCESS_REQUIRED: FULL git push requires explicit network access")
-	}
-	timeout, err := commandTimeout(input.TimeoutSeconds)
-	if err != nil {
-		return ExecResult{}, err
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	execCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+	profile, networkAccess, remoteGitRewrite := h.currentPolicy()
 	processID, err := randomProcessID()
 	if err != nil {
 		return ExecResult{}, err
 	}
-	environment, cleanupRuntime, err := commandRuntimeEnvironment(
-		filepath.Clean(workspaceRoot), processID, final.Environment,
-		executionpolicy.AllowsHostGitCredentials(policyInvocation), sandbox,
-	)
+	if persistent {
+		h.processMu.RLock()
+		running := 0
+		for _, process := range h.processes {
+			process.mu.RLock()
+			if process.state == "running" || process.state == "stopping" {
+				running++
+			}
+			process.mu.RUnlock()
+		}
+		closed := h.closed
+		h.processMu.RUnlock()
+		if closed {
+			return ExecResult{}, errors.New("CODEX_TOOLHOST_CLOSED")
+		}
+		if running >= maxPersistentProcesses {
+			return ExecResult{}, errors.New("CODING_PERSISTENT_PROCESS_LIMIT")
+		}
+	}
+	runtime, err := security.PrepareCommandRuntime(h.dataRoot, workspaceRoot, processID, profile)
 	if err != nil {
 		return ExecResult{}, err
 	}
-	defer cleanupRuntime()
-	handle, err := h.service.StartCommand(execCtx, codex.CommandSpec{
+	keepRuntime := false
+	defer func() {
+		if !keepRuntime {
+			runtime.Cleanup()
+		}
+	}()
+	final, err := h.resolver.Resolve(workspaceRoot, arguments, runtime.BridgeRoot)
+	if err != nil {
+		return ExecResult{}, err
+	}
+	policyInvocation := security.Invocation{
+		Executable: final.TargetExecutable, Argv: final.TargetArgv, CWD: final.CWD, AccessProfile: profile,
+		TrustedGitExecutable: h.git, RemoteGitRewrite: remoteGitRewrite, ProtectedExecutables: h.protectedExecutables,
+	}
+	if err := security.Check(policyInvocation, workspaceRoot, h.dataRoot); err != nil {
+		return ExecResult{}, err
+	}
+	if err := h.gitSafety.Before(ctxOrBackground(ctx), policyInvocation, workspaceRoot); err != nil {
+		return ExecResult{}, err
+	}
+	sandbox := codex.CommandSandboxWorkspaceWrite
+	if security.IsFull(profile) {
+		sandbox = codex.CommandSandboxFullAccess
+	}
+	environment, err := runtime.Environment(final.Environment, sandbox)
+	if err != nil {
+		return ExecResult{}, err
+	}
+	commandCtx := ctxOrBackground(ctx)
+	var cancel context.CancelFunc = func() {}
+	if !persistent {
+		timeout, timeoutErr := commandTimeout(input.TimeoutSeconds)
+		if timeoutErr != nil {
+			return ExecResult{}, timeoutErr
+		}
+		commandCtx, cancel = context.WithTimeout(commandCtx, timeout)
+	} else {
+		commandCtx, cancel = context.WithCancel(context.Background())
+	}
+	cancelTransferred := false
+	defer func() {
+		if !cancelTransferred {
+			cancel()
+		}
+	}()
+	handle, err := h.service.StartCommand(commandCtx, codex.CommandSpec{
 		ProcessID: processID, Executable: final.Executable, Argv: final.Argv,
-		CWD: final.CWD, WritableRoot: filepath.Clean(workspaceRoot),
-		Environment: environment, Sandbox: sandbox, NetworkAccess: networkAccess,
+		CWD: final.CWD, WritableRoot: workspaceRoot,
+		WritableRoots: []string{runtime.ProcessRoot, filepath.Join(runtime.WorkspaceRuntime, "cache"), runtime.AuthRoot},
+		Environment:   environment,
+		Sandbox:       sandbox, NetworkAccess: networkAccess,
 	})
 	if err != nil {
+		cancel()
 		return ExecResult{}, err
 	}
+	if persistent {
+		startedAt := time.Now().UTC()
+		process := &persistentProcess{
+			id: processID, pid: handle.PID(), workspace: workspaceRoot, command: input.Command,
+			argv: append([]string(nil), input.Argv...), startedAt: startedAt, state: "running",
+			handle: handle, runtime: runtime, done: make(chan struct{}),
+		}
+		state := map[string]any{
+			"schema": "cwapi.persistent-process.v1", "process_id": processID, "workspace": workspaceRoot,
+			"command": input.Command, "argv": input.Argv, "pid": process.pid,
+			"started_at": startedAt.Format(time.RFC3339Nano), "state": "running",
+		}
+		if err := runtime.WriteProcessState(state); err != nil {
+			_ = handle.Stop()
+			cancel()
+			return ExecResult{}, fmt.Errorf("CODING_PERSISTENT_STATE_WRITE_FAILED: %w", err)
+		}
+		h.processMu.Lock()
+		if h.closed {
+			h.processMu.Unlock()
+			_ = handle.Stop()
+			cancel()
+			return ExecResult{}, errors.New("CODEX_TOOLHOST_CLOSED")
+		}
+		h.processes[processID] = process
+		h.processMu.Unlock()
+		keepRuntime = true
+		cancelTransferred = true
+		go h.watchPersistent(process, cancel)
+		return process.snapshot(), nil
+	}
+
 	select {
 	case result := <-handle.Done():
-		if result.Err != nil {
-			return ExecResult{}, result.Err
-		}
-		stdout, stdoutTrimmed := boundedTail(result.Stdout, maxOutputBytes)
-		stderr, stderrTrimmed := boundedTail(result.Stderr, maxOutputBytes)
-		state := "completed"
-		if result.ExitCode != 0 {
-			state = "failed"
-		}
-		return ExecResult{
-			State: state, ExitCode: result.ExitCode, Stdout: stdout, Stderr: stderr,
-			Truncated: stdoutTrimmed || stderrTrimmed,
-		}, nil
-	case <-execCtx.Done():
+		return commandResult(result, "", 0, time.Time{}), nil
+	case <-commandCtx.Done():
 		_ = handle.Stop()
-		return ExecResult{}, fmt.Errorf("CODEX_TOOLHOST_COMMAND_TIMEOUT: %w", execCtx.Err())
+		return ExecResult{}, fmt.Errorf("CODEX_TOOLHOST_COMMAND_TIMEOUT: %w", commandCtx.Err())
 	}
+}
+
+func (h *Host) watchPersistent(process *persistentProcess, cancel context.CancelFunc) {
+	result := <-process.handle.Done()
+	cancel()
+	output := commandResult(result, process.id, process.pid, process.startedAt)
+	process.mu.Lock()
+	if process.stopRequested {
+		output.State = "stopped"
+	}
+	process.state = output.State
+	process.result = output
+	process.mu.Unlock()
+	process.runtime.Cleanup()
+	close(process.done)
+	h.pruneTerminalProcesses()
+}
+
+func (h *Host) pruneTerminalProcesses() {
+	h.processMu.Lock()
+	defer h.processMu.Unlock()
+	for len(h.processes) > maxPersistentRecords {
+		var oldest *persistentProcess
+		for _, candidate := range h.processes {
+			candidate.mu.RLock()
+			terminal := candidate.state != "running" && candidate.state != "stopping"
+			startedAt := candidate.startedAt
+			candidate.mu.RUnlock()
+			if terminal && (oldest == nil || startedAt.Before(oldest.startedAt)) {
+				oldest = candidate
+			}
+		}
+		if oldest == nil {
+			return
+		}
+		delete(h.processes, oldest.id)
+	}
+}
+
+func (h *Host) persistentStatus(workspaceRoot, processID string) (ExecResult, error) {
+	process, err := h.lookupPersistent(workspaceRoot, processID)
+	if err != nil {
+		return ExecResult{}, err
+	}
+	return process.snapshot(), nil
+}
+
+func (h *Host) stopPersistent(ctx context.Context, workspaceRoot, processID string) (ExecResult, error) {
+	process, err := h.lookupPersistent(workspaceRoot, processID)
+	if err != nil {
+		return ExecResult{}, err
+	}
+	process.mu.Lock()
+	if process.state != "running" && process.state != "stopping" {
+		result := process.snapshotLocked()
+		process.mu.Unlock()
+		return result, nil
+	}
+	process.stopRequested = true
+	process.state = "stopping"
+	handle := process.handle
+	done := process.done
+	process.mu.Unlock()
+	if err := handle.Stop(); err != nil {
+		return ExecResult{}, err
+	}
+	waitCtx := ctxOrBackground(ctx)
+	select {
+	case <-done:
+		return process.snapshot(), nil
+	case <-waitCtx.Done():
+		return ExecResult{}, fmt.Errorf("CODING_PERSISTENT_STOP_TIMEOUT: %w", waitCtx.Err())
+	case <-time.After(5 * time.Second):
+		return ExecResult{}, errors.New("CODING_PERSISTENT_STOP_TIMEOUT")
+	}
+}
+
+func (h *Host) lookupPersistent(workspaceRoot, processID string) (*persistentProcess, error) {
+	processID = strings.TrimSpace(processID)
+	if processID == "" {
+		return nil, errors.New("CODING_PROCESS_ID_REQUIRED")
+	}
+	h.processMu.RLock()
+	process := h.processes[processID]
+	h.processMu.RUnlock()
+	if process == nil {
+		return nil, errors.New("CODING_PROCESS_NOT_FOUND")
+	}
+	if !strings.EqualFold(process.workspace, workspaceRoot) {
+		return nil, errors.New("CODING_PROCESS_WORKSPACE_MISMATCH")
+	}
+	return process, nil
+}
+
+func (p *persistentProcess) snapshot() ExecResult {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.snapshotLocked()
+}
+
+func (p *persistentProcess) snapshotLocked() ExecResult {
+	if p.result.State != "" {
+		return p.result
+	}
+	return ExecResult{
+		State: p.state, ProcessID: p.id, PID: p.pid,
+		StartedAt: p.startedAt.Format(time.RFC3339Nano),
+	}
+}
+
+func (h *Host) Close(ctx context.Context) error {
+	if h == nil {
+		return nil
+	}
+	h.processMu.Lock()
+	if h.closed {
+		h.processMu.Unlock()
+		return nil
+	}
+	h.closed = true
+	processes := make([]*persistentProcess, 0, len(h.processes))
+	for _, process := range h.processes {
+		processes = append(processes, process)
+	}
+	h.processMu.Unlock()
+	var joined error
+	for _, process := range processes {
+		if _, err := h.stopPersistent(ctx, process.workspace, process.id); err != nil {
+			joined = errors.Join(joined, err)
+		}
+	}
+	return joined
+}
+
+func (h *Host) StopWorkspace(ctx context.Context, workspaceRoot string) error {
+	if h == nil {
+		return nil
+	}
+	workspaceRoot = filepath.Clean(workspaceRoot)
+	h.processMu.RLock()
+	processes := make([]*persistentProcess, 0)
+	for _, process := range h.processes {
+		if strings.EqualFold(process.workspace, workspaceRoot) {
+			processes = append(processes, process)
+		}
+	}
+	h.processMu.RUnlock()
+	var joined error
+	for _, process := range processes {
+		if _, err := h.stopPersistent(ctx, workspaceRoot, process.id); err != nil {
+			joined = errors.Join(joined, err)
+		}
+	}
+	return joined
 }
 
 func decodeArguments(input ExecInput) (processcontract.StartArguments, error) {
@@ -230,13 +509,11 @@ func commandTimeout(seconds int) (time.Duration, error) {
 }
 
 func commandEnvironment(dataRoot, executable string) []string {
-	base := childenv.Git(filepath.Join(dataRoot, "temp", "gh-config"))
+	base := childenv.Canonical()
 	privateRoot := filepath.Dir(filepath.Dir(filepath.Clean(executable)))
 	appRoot := filepath.Dir(filepath.Clean(dataRoot))
 	paths := []string{
-		filepath.Join(privateRoot, "bin"),
-		filepath.Join(privateRoot, "codex-resources"),
-		filepath.Join(privateRoot, "codex-path"),
+		filepath.Join(privateRoot, "bin"), filepath.Join(privateRoot, "codex-resources"), filepath.Join(privateRoot, "codex-path"),
 		filepath.Join(appRoot, "runtime", "git", "cmd"),
 	}
 	available := make([]string, 0, len(paths)+1)
@@ -249,167 +526,39 @@ func commandEnvironment(dataRoot, executable string) []string {
 		available = append(available, inherited)
 	}
 	pathValue := strings.Join(available, string(os.PathListSeparator))
-	prompt, interactive, noSystem, noGlobal := "0", "Never", "1", os.DevNull
-	return childenv.Merge(base, map[string]*string{
-		"PATH": &pathValue, "GIT_TERMINAL_PROMPT": &prompt, "GCM_INTERACTIVE": &interactive,
-		"GIT_CONFIG_NOSYSTEM": &noSystem, "GIT_CONFIG_GLOBAL": &noGlobal,
-	})
+	return childenv.Merge(base, map[string]*string{"PATH": &pathValue})
 }
 
-func commandRuntimeEnvironment(workspaceRoot, processID string, entries []string, allowHostGitCredentials bool, sandbox string) ([]string, func(), error) {
-	runtimeRoot, err := createCommandRuntimeRoot(workspaceRoot, processID)
-	if err != nil {
-		return nil, func() {}, err
+func commandResult(result codex.CommandResult, processID string, pid int, startedAt time.Time) ExecResult {
+	if result.Err != nil {
+		stderr, trimmed := boundedTail(result.Err.Error(), maxOutputBytes)
+		return ExecResult{State: "failed", ProcessID: processID, PID: pid, StartedAt: formatStartedAt(startedAt), ExitCode: -1, Stderr: stderr, Truncated: trimmed}
 	}
-	paths := map[string]string{
-		"TEMP":             filepath.Join(runtimeRoot, "temp"),
-		"GOCACHE":          filepath.Join(runtimeRoot, "cache", "go-build"),
-		"GOMODCACHE":       filepath.Join(runtimeRoot, "cache", "go-mod"),
-		"NPM_CONFIG_CACHE": filepath.Join(runtimeRoot, "cache", "npm"),
-		"PIP_CACHE_DIR":    filepath.Join(runtimeRoot, "cache", "pip"),
-		"CARGO_HOME":       filepath.Join(runtimeRoot, "cache", "cargo"),
-		"APPDATA":          filepath.Join(runtimeRoot, "appdata"),
-		"LOCALAPPDATA":     filepath.Join(runtimeRoot, "localappdata"),
-		"USERPROFILE":      filepath.Join(runtimeRoot, "profile"),
-		"GH_CONFIG_DIR":    filepath.Join(runtimeRoot, "gh-config"),
-		"XDG_CONFIG_HOME":  filepath.Join(runtimeRoot, "xdg", "config"),
-		"XDG_CACHE_HOME":   filepath.Join(runtimeRoot, "xdg", "cache"),
+	stdout, stdoutTrimmed := boundedTail(result.Stdout, maxOutputBytes)
+	stderr, stderrTrimmed := boundedTail(result.Stderr, maxOutputBytes)
+	state := "completed"
+	if result.ExitCode != 0 {
+		state = "failed"
 	}
-	for _, path := range paths {
-		if err := os.MkdirAll(path, 0o700); err != nil {
-			_ = os.RemoveAll(runtimeRoot)
-			return nil, func() {}, fmt.Errorf("CODEX_TOOLHOST_RUNTIME_DIR_CREATE_FAILED: %w", err)
-		}
+	return ExecResult{
+		State: state, ProcessID: processID, PID: pid, StartedAt: formatStartedAt(startedAt),
+		ExitCode: result.ExitCode, Stdout: stdout, Stderr: stderr, Truncated: stdoutTrimmed || stderrTrimmed,
 	}
-	nodePreload := filepath.Join(runtimeRoot, "node-preload.cjs")
-	if err := os.WriteFile(nodePreload, []byte(nodeSandboxPreload), 0o600); err != nil {
-		_ = os.RemoveAll(runtimeRoot)
-		return nil, func() {}, fmt.Errorf("CODEX_TOOLHOST_NODE_PRELOAD_CREATE_FAILED: %w", err)
-	}
-	temp, profile := paths["TEMP"], paths["USERPROFILE"]
-	npmUserConfig, gitNoSystem, gitGlobal := os.DevNull, "1", os.DevNull
-	gitCount, hookKey, hookValue := "2", "core.hooksPath", os.DevNull
-	interactiveKey, interactiveValue := "credential.interactive", "never"
-	telemetry := "off"
-	nodeOptions := `--require="` + filepath.ToSlash(nodePreload) + `"`
-	overrides := map[string]*string{
-		"TEMP": &temp, "TMP": &temp, "TMPDIR": &temp, "GOTMPDIR": &temp,
-		"GOCACHE": pointer(paths["GOCACHE"]), "GOMODCACHE": pointer(paths["GOMODCACHE"]),
-		"NPM_CONFIG_CACHE": pointer(paths["NPM_CONFIG_CACHE"]), "NPM_CONFIG_USERCONFIG": &npmUserConfig,
-		"PIP_CACHE_DIR": pointer(paths["PIP_CACHE_DIR"]), "PYTHONPYCACHEPREFIX": pointer(filepath.Join(runtimeRoot, "cache", "python")),
-		"CARGO_HOME": pointer(paths["CARGO_HOME"]), "GRADLE_USER_HOME": pointer(filepath.Join(runtimeRoot, "cache", "gradle")),
-		"APPDATA": pointer(paths["APPDATA"]), "LOCALAPPDATA": pointer(paths["LOCALAPPDATA"]),
-		"USERPROFILE": &profile, "HOME": &profile, "GH_CONFIG_DIR": pointer(paths["GH_CONFIG_DIR"]),
-		"XDG_CONFIG_HOME": pointer(paths["XDG_CONFIG_HOME"]), "XDG_CACHE_HOME": pointer(paths["XDG_CACHE_HOME"]),
-		"GIT_CONFIG_NOSYSTEM": &gitNoSystem, "GIT_CONFIG_GLOBAL": &gitGlobal,
-		"GIT_CONFIG_COUNT": &gitCount, "GIT_CONFIG_KEY_0": &hookKey, "GIT_CONFIG_VALUE_0": &hookValue,
-		"GIT_CONFIG_KEY_1": &interactiveKey, "GIT_CONFIG_VALUE_1": &interactiveValue,
-		"GOTELEMETRY": &telemetry, "CWAPI_CODEX_SANDBOX": &sandbox, "NODE_OPTIONS": &nodeOptions,
-	}
-	for _, key := range []string{
-		"OPENAI_API_KEY", "CODEX_API_KEY", "GH_TOKEN", "GITHUB_TOKEN",
-		"GIT_TRACE", "GIT_CURL_VERBOSE", "GH_DEBUG",
-	} {
-		overrides[key] = nil
-	}
-	if sandbox == codex.CommandSandboxFullAccess {
-		for _, key := range []string{"APPDATA", "LOCALAPPDATA", "USERPROFILE", "HOME"} {
-			if value := strings.TrimSpace(os.Getenv(key)); value != "" {
-				overrides[key] = &value
-			} else {
-				overrides[key] = nil
-			}
-		}
-	}
-	if allowHostGitCredentials {
-		gitAllowProtocol, gitProtocolFromUser := "https:ssh", "0"
-		overrides["GIT_CONFIG_NOSYSTEM"] = nil
-		overrides["GIT_CONFIG_GLOBAL"] = nil
-		overrides["GIT_ALLOW_PROTOCOL"] = &gitAllowProtocol
-		overrides["GIT_PROTOCOL_FROM_USER"] = &gitProtocolFromUser
-	}
-	cleanup := func() {
-		_ = os.RemoveAll(runtimeRoot)
-		_ = os.Remove(filepath.Dir(runtimeRoot))
-	}
-	return childenv.Merge(entries, overrides), cleanup, nil
 }
 
-func createCommandRuntimeRoot(workspaceRoot, processID string) (string, error) {
-	if !validProcessID(processID) {
-		return "", errors.New("CODEX_TOOLHOST_PROCESS_ID_INVALID")
+func formatStartedAt(value time.Time) string {
+	if value.IsZero() {
+		return ""
 	}
-	resolvedWorkspace, err := filepath.EvalSymlinks(filepath.Clean(workspaceRoot))
-	if err != nil {
-		return "", fmt.Errorf("CODEX_TOOLHOST_WORKSPACE_RESOLVE_FAILED: %w", err)
-	}
-	resolvedWorkspace, err = filepath.Abs(resolvedWorkspace)
-	if err != nil {
-		return "", fmt.Errorf("CODEX_TOOLHOST_WORKSPACE_RESOLVE_FAILED: %w", err)
-	}
-	runtimeBase := filepath.Join(resolvedWorkspace, ".cwapi-runtime")
-	if info, statErr := os.Lstat(runtimeBase); statErr == nil {
-		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-			return "", errors.New("CODEX_TOOLHOST_RUNTIME_ROOT_INVALID")
-		}
-	} else if !errors.Is(statErr, os.ErrNotExist) {
-		return "", fmt.Errorf("CODEX_TOOLHOST_RUNTIME_ROOT_INVALID: %w", statErr)
-	} else if err := os.Mkdir(runtimeBase, 0o700); err != nil {
-		return "", fmt.Errorf("CODEX_TOOLHOST_RUNTIME_ROOT_CREATE_FAILED: %w", err)
-	}
-	resolvedBase, err := filepath.EvalSymlinks(runtimeBase)
-	if err != nil || !runtimePathWithin(resolvedBase, resolvedWorkspace) {
-		return "", errors.New("CODEX_TOOLHOST_RUNTIME_ROOT_OUTSIDE_WORKSPACE")
-	}
-	runtimeRoot := filepath.Join(runtimeBase, processID)
-	if err := os.Mkdir(runtimeRoot, 0o700); err != nil {
-		_ = os.Remove(runtimeBase)
-		return "", fmt.Errorf("CODEX_TOOLHOST_RUNTIME_DIR_CREATE_FAILED: %w", err)
-	}
-	return runtimeRoot, nil
+	return value.Format(time.RFC3339Nano)
 }
 
-func validProcessID(value string) bool {
-	if !strings.HasPrefix(value, "proc-") || len(value) != len("proc-")+24 {
-		return false
+func ctxOrBackground(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
 	}
-	for _, char := range value[len("proc-"):] {
-		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
-			return false
-		}
-	}
-	return true
+	return ctx
 }
-
-func runtimePathWithin(path, root string) bool {
-	path, root = filepath.Clean(path), filepath.Clean(root)
-	relative, err := filepath.Rel(root, path)
-	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && !filepath.IsAbs(relative)
-}
-
-func pointer(value string) *string { return &value }
-
-const nodeSandboxPreload = `"use strict";
-const childProcess = require("node:child_process");
-const { EventEmitter } = require("node:events");
-const { syncBuiltinESMExports } = require("node:module");
-const originalExec = childProcess.exec;
-childProcess.exec = function(command, ...args) {
-  if (process.platform === "win32" && command === "net use") {
-    const callback = [...args].reverse().find((value) => typeof value === "function");
-    const child = new EventEmitter();
-    process.nextTick(() => {
-      const error = Object.assign(new Error("net use is unavailable in the CWapi SAFE sandbox"), { code: "EPERM" });
-      if (callback) callback(error, "", "");
-      child.emit("exit", 1, null);
-      child.emit("close", 1, null);
-    });
-    return child;
-  }
-  return Reflect.apply(originalExec, this, [command, ...args]);
-};
-syncBuiltinESMExports();
-`
 
 func randomProcessID() (string, error) {
 	var value [12]byte

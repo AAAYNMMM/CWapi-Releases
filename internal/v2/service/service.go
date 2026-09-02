@@ -25,6 +25,7 @@ type CodingLifecycle interface {
 type CodingPolicy interface {
 	SetAccessProfile(string) error
 	SetNetworkAccess(bool) error
+	SetRemoteGitRewrite(bool) error
 }
 
 type AgentProviderLifecycle interface {
@@ -54,19 +55,20 @@ type Dependencies struct {
 }
 
 type Snapshot struct {
-	State              string                        `json:"state"`
-	MCP                mcpserver.Snapshot            `json:"mcp"`
-	CodexAccessProfile string                        `json:"codex_access_profile"`
-	CodexNetworkAccess bool                          `json:"codex_network_access"`
-	Codex              codextoolhost.RuntimeSnapshot `json:"codex"`
-	Coding             coding.RuntimeSnapshot        `json:"coding"`
-	Workspaces         workspace.IndexSnapshot       `json:"workspaces"`
-	AgentEnabled       bool                          `json:"agent_enabled"`
-	AgentProvider      agentbroker.ProviderSnapshot  `json:"agent_provider"`
-	Agent              agentbroker.Snapshot          `json:"agent"`
-	OpenAITunnel       tunnel.Snapshot               `json:"openai_tunnel"`
-	AgentOpenAITunnel  tunnel.Snapshot               `json:"agent_openai_tunnel"`
-	LastError          string                        `json:"last_error,omitempty"`
+	State                 string                        `json:"state"`
+	MCP                   mcpserver.Snapshot            `json:"mcp"`
+	CodexAccessProfile    string                        `json:"codex_access_profile"`
+	CodexNetworkAccess    bool                          `json:"codex_network_access"`
+	CodexRemoteGitRewrite bool                          `json:"codex_remote_git_rewrite"`
+	Codex                 codextoolhost.RuntimeSnapshot `json:"codex"`
+	Coding                coding.RuntimeSnapshot        `json:"coding"`
+	Workspaces            workspace.IndexSnapshot       `json:"workspaces"`
+	AgentEnabled          bool                          `json:"agent_enabled"`
+	AgentProvider         agentbroker.ProviderSnapshot  `json:"agent_provider"`
+	Agent                 agentbroker.Snapshot          `json:"agent"`
+	OpenAITunnel          tunnel.Snapshot               `json:"openai_tunnel"`
+	AgentOpenAITunnel     tunnel.Snapshot               `json:"agent_openai_tunnel"`
+	LastError             string                        `json:"last_error,omitempty"`
 }
 
 type Service struct {
@@ -314,7 +316,8 @@ func (s *Service) Snapshot() Snapshot {
 	}
 	return Snapshot{
 		State: state, MCP: s.mcp.Snapshot(), CodexAccessProfile: cfg.Codex.AccessProfile, CodexNetworkAccess: cfg.Codex.NetworkAccess,
-		Codex: codexState, Coding: codingState, Workspaces: workspaceState,
+		CodexRemoteGitRewrite: cfg.Codex.RemoteGitRewrite,
+		Codex:                 codexState, Coding: codingState, Workspaces: workspaceState,
 		AgentEnabled: cfg.Agent.Enabled, AgentProvider: provider, Agent: broker,
 		OpenAITunnel: openAITunnel, AgentOpenAITunnel: agentOpenAITunnel, LastError: lastError,
 	}
@@ -388,6 +391,44 @@ func (s *Service) UpdateCodexNetworkAccess(allowed bool) (Snapshot, error) {
 		return s.Snapshot(), err
 	}
 	if err := setter.SetNetworkAccess(allowed); err != nil {
+		rollbackErr := v2config.SaveAtomic(configPath, before)
+		return s.Snapshot(), errors.Join(err, rollbackErr)
+	}
+	s.mu.Lock()
+	s.config = candidate
+	s.mu.Unlock()
+	return s.Snapshot(), nil
+}
+
+func (s *Service) UpdateCodexRemoteGitRewrite(allowed bool) (Snapshot, error) {
+	if s == nil {
+		return Snapshot{State: "unavailable"}, errors.New("V2_SERVICE_UNAVAILABLE")
+	}
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.closed {
+		return s.Snapshot(), errors.New("V2_SERVICE_CLOSED")
+	}
+	s.mu.RLock()
+	before := s.config
+	configPath := s.configPath
+	setter := s.codingPolicy
+	s.mu.RUnlock()
+	candidate := before
+	candidate.Codex.RemoteGitRewrite = allowed
+	if err := v2config.Validate(candidate); err != nil {
+		return s.Snapshot(), err
+	}
+	if candidate.Codex.RemoteGitRewrite == before.Codex.RemoteGitRewrite {
+		return s.Snapshot(), nil
+	}
+	if setter == nil {
+		return s.Snapshot(), errors.New("V2_CODING_POLICY_UNAVAILABLE")
+	}
+	if err := v2config.SaveAtomic(configPath, candidate); err != nil {
+		return s.Snapshot(), err
+	}
+	if err := setter.SetRemoteGitRewrite(allowed); err != nil {
 		rollbackErr := v2config.SaveAtomic(configPath, before)
 		return s.Snapshot(), errors.Join(err, rollbackErr)
 	}

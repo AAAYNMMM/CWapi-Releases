@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	bridgeName           = ".cwapi-process-bridge.cmd"
+	bridgeName           = "bridge.cmd"
 	maxBatchPayloadBytes = 32 * 1024
 	maxBatchSearchPath   = 6 * 1024
 )
@@ -50,7 +50,7 @@ func (r *Resolver) ResolvePATHExecutable(command string) (string, error) {
 	return r.resolveExecutable("", command)
 }
 
-func (r *Resolver) Resolve(repositoryRoot string, input processcontract.StartArguments) (Final, error) {
+func (r *Resolver) Resolve(repositoryRoot string, input processcontract.StartArguments, bridgeRoots ...string) (Final, error) {
 	if r == nil || !filepath.IsAbs(repositoryRoot) {
 		return Final{}, errors.New("INVOCATION_REPOSITORY_ROOT_INVALID")
 	}
@@ -73,7 +73,14 @@ func (r *Resolver) Resolve(repositoryRoot string, input processcontract.StartArg
 	}
 	extension := strings.ToLower(filepath.Ext(target))
 	if extension == ".cmd" || extension == ".bat" {
-		if err := r.wrapBatch(&final); err != nil {
+		if len(bridgeRoots) != 1 {
+			return Final{}, errors.New("INVOCATION_BRIDGE_ROOT_REQUIRED")
+		}
+		bridgeRoot, err := resolveDirectory(bridgeRoots[0])
+		if err != nil || pathWithin(bridgeRoot, root) {
+			return Final{}, errors.New("INVOCATION_BRIDGE_ROOT_INVALID")
+		}
+		if err := r.wrapBatch(&final, bridgeRoot); err != nil {
 			return Final{}, err
 		}
 	}
@@ -138,7 +145,7 @@ func (r *Resolver) resolveExecutable(cwd, remote string) (string, error) {
 	return "", errors.New("INVOCATION_EXECUTABLE_NOT_FOUND")
 }
 
-func (r *Resolver) wrapBatch(final *Final) error {
+func (r *Resolver) wrapBatch(final *Final, bridgeRoot string) error {
 	for _, argument := range final.TargetArgv {
 		if strings.ContainsAny(argument, "\"\r\n") {
 			return errors.New("INVOCATION_BATCH_ARGUMENT_UNREPRESENTABLE")
@@ -154,7 +161,7 @@ func (r *Resolver) wrapBatch(final *Final) error {
 		return errors.New("INVOCATION_BATCH_PAYLOAD_TOO_LARGE")
 	}
 	binding := base64.RawURLEncoding.EncodeToString(payload)
-	bridgePath := filepath.Join(final.CWD, bridgeName)
+	bridgePath := filepath.Join(bridgeRoot, bridgeName)
 	bridgeBody := batchBridgeBody(len(final.TargetArgv))
 	bridgeCreated, err := ensureBridge(bridgePath, bridgeBody)
 	if err != nil {
@@ -165,7 +172,7 @@ func (r *Resolver) wrapBatch(final *Final) error {
 		return errors.New("INVOCATION_SYSTEM_CMD_INVALID")
 	}
 	final.Executable = cmdPath
-	final.Argv = []string{"/d", "/s", "/v:on", "/c", bridgeName, binding, r.path}
+	final.Argv = []string{"/d", "/s", "/v:on", "/c", bridgePath, binding, r.path}
 	final.BindingPayload = binding
 	final.BridgePath = bridgePath
 	final.BridgeCreated = bridgeCreated

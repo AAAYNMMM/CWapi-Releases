@@ -12,6 +12,7 @@ import {
   SetAgentEnabled,
   UpdateCodexAccessProfile,
   UpdateCodexNetworkAccess,
+  UpdateCodexRemoteGitRewrite,
 } from "../wailsjs/go/main/App";
 import { WindowHide } from "../wailsjs/runtime/runtime";
 
@@ -21,6 +22,7 @@ type Snapshot = {
   mcp?: { state?: string; address?: string; error?: string };
   codex_access_profile?: string;
   codex_network_access?: boolean;
+  codex_remote_git_rewrite?: boolean;
   codex?: { state?: string; executable?: string; last_error?: string };
   coding?: { state?: string; active?: number; repositories?: string[] };
   workspaces?: { repository_count?: number; repositories?: string[]; invalid_entries?: number };
@@ -260,7 +262,21 @@ export default function App() {
     });
   }
 
+  function changeRemoteGitRewrite(allowed: boolean) {
+    if (!allowed) {
+      void action(() => UpdateCodexRemoteGitRewrite(false), "远程 Git 重写已禁用");
+      return;
+    }
+    askConfirmation({
+      title: "启用远程 Git 重写？",
+      description: "将允许 force push 与远程 branch/tag 删除。危险 transport、receive-pack 注入和 CWapi safety refs 仍会被拒绝。",
+      confirmLabel: "启用高级能力",
+      onConfirm: async () => { await action(() => UpdateCodexRemoteGitRewrite(true), "远程 Git 重写已启用"); },
+    });
+  }
+
   const access = snapshot.codex_access_profile || "safe";
+  const remoteGitRewrite = Boolean(snapshot.codex_remote_git_rewrite);
   const bridge = snapshot.agent?.bridge_state || "offline";
   const workspaces = snapshot.workspaces?.repositories || [];
   const issue = actionError || refreshError || snapshotIssue(page, snapshot, page === "coding" ? codingTunnel : agentTunnel);
@@ -269,7 +285,7 @@ export default function App() {
       <header className="titlebar">
         <div className="brand-row">
           <div className="logo">CW</div>
-          <div><strong>CWapi</strong><span>2.0.3</span></div>
+          <div><strong>CWapi</strong><span>2.0.4</span></div>
         </div>
         <button className="window-button" onClick={WindowHide} aria-label="缩小到托盘" title="缩小到托盘">×</button>
       </header>
@@ -290,12 +306,14 @@ export default function App() {
             workspaces={workspaces}
             access={access}
             networkAccess={Boolean(snapshot.codex_network_access)}
+            remoteGitRewrite={remoteGitRewrite}
             onTunnelIDChange={setCodingTunnelID}
             onTunnelKeyChange={setCodingTunnelKey}
             onConfigureTunnel={configureCodingTunnel}
             onClearTunnel={clearCodingTunnel}
             onAccessChange={(next) => void action(() => UpdateCodexAccessProfile(next), next === "safe" ? "Codex 已切换为安全模式" : "Codex 已切换为完整模式")}
             onNetworkAccessChange={(allowed) => void action(() => UpdateCodexNetworkAccess(allowed), allowed ? "Coding 网络访问已启用" : "Coding 网络访问已禁用")}
+            onRemoteGitRewriteChange={changeRemoteGitRewrite}
             onOpenWorkspaceManager={() => setWorkspaceManagerOpen(true)}
           />
         ) : (
@@ -348,7 +366,7 @@ function PageTab({ page, activePage, label, detail, status, onSelect }: { page: 
   );
 }
 
-function CodingPage({ snapshot, tunnel, tunnelID, tunnelKey, working, workspaces, access, networkAccess, onTunnelIDChange, onTunnelKeyChange, onConfigureTunnel, onClearTunnel, onAccessChange, onNetworkAccessChange, onOpenWorkspaceManager }: {
+function CodingPage({ snapshot, tunnel, tunnelID, tunnelKey, working, workspaces, access, networkAccess, remoteGitRewrite, onTunnelIDChange, onTunnelKeyChange, onConfigureTunnel, onClearTunnel, onAccessChange, onNetworkAccessChange, onRemoteGitRewriteChange, onOpenWorkspaceManager }: {
   snapshot: Snapshot;
   tunnel: TunnelInfo;
   tunnelID: string;
@@ -357,12 +375,14 @@ function CodingPage({ snapshot, tunnel, tunnelID, tunnelKey, working, workspaces
   workspaces: string[];
   access: string;
   networkAccess: boolean;
+  remoteGitRewrite: boolean;
   onTunnelIDChange: (value: string) => void;
   onTunnelKeyChange: (value: string) => void;
   onConfigureTunnel: () => Promise<void>;
   onClearTunnel: () => void;
   onAccessChange: (value: string) => void;
   onNetworkAccessChange: (allowed: boolean) => void;
+  onRemoteGitRewriteChange: (allowed: boolean) => void;
   onOpenWorkspaceManager: () => void;
 }) {
   return (
@@ -374,9 +394,14 @@ function CodingPage({ snapshot, tunnel, tunnelID, tunnelKey, working, workspaces
           <button disabled={working} className={access === "safe" ? "selected" : ""} onClick={() => onAccessChange("safe")}>安全 SAFE</button>
           <button disabled={working} className={access === "full" ? "selected danger" : ""} onClick={() => onAccessChange("full")}>完整 FULL</button>
         </div>
-        <div className="card-title"><span>命令网络访问</span><label className="switch"><input type="checkbox" aria-label="允许 Coding 命令访问网络" checked={networkAccess} disabled={working} onChange={(event) => onNetworkAccessChange(event.target.checked)} /><span /></label></div>
-        <StatRow label="活动会话" value={snapshot.coding?.active ?? 0} />
-        <StatRow label="工作区仓库" value={snapshot.workspaces?.repository_count ?? 0} />
+        <div className="toggle-row">
+          <div className="toggle-item"><span>网络访问</span><label className="switch"><input type="checkbox" aria-label="允许 Coding 命令访问网络" checked={networkAccess} disabled={working} onChange={(event) => onNetworkAccessChange(event.target.checked)} /><span /></label></div>
+          <div className="toggle-item"><span>远程Git重写</span><label className="switch"><input type="checkbox" aria-label="允许远程 Git 重写" checked={remoteGitRewrite} disabled={working} onChange={(event) => onRemoteGitRewriteChange(event.target.checked)} /><span /></label></div>
+        </div>
+        <div className="stats-row">
+          <StatRow label="活动会话" value={snapshot.coding?.active ?? 0} />
+          <StatRow label="工作区仓库" value={snapshot.workspaces?.repository_count ?? 0} />
+        </div>
         {(snapshot.coding?.repositories || []).slice(0, 2).map((repo) => <div className="repo" key={repo}>{repo}</div>)}
         <button className="text-button" disabled={working} onClick={onOpenWorkspaceManager}>管理工作区</button>
       </section>

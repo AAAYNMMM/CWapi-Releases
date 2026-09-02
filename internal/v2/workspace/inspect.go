@@ -15,6 +15,8 @@ type Snapshot struct {
 	TargetRef      string
 	ResolvedCommit string
 	CurrentHead    string
+	CurrentBranch  string
+	Detached       bool
 	TrackingHead   string
 	TrackedDirty   bool
 	Divergence     string
@@ -65,6 +67,10 @@ func (m *Manager) Inspect(ctx context.Context, repositoryURL string) (Snapshot, 
 	if err != nil {
 		return Snapshot{}, err
 	}
+	currentBranch, detached, err := m.currentBranch(ctx, repoPath)
+	if err != nil {
+		return Snapshot{}, err
+	}
 	trackingHead, err := m.localTrackingHead(ctx, repoPath, meta.TargetRef)
 	if err != nil {
 		return Snapshot{}, err
@@ -74,13 +80,15 @@ func (m *Manager) Inspect(ctx context.Context, repositoryURL string) (Snapshot, 
 		return Snapshot{}, err
 	}
 	return Snapshot{
-		Repository: identity.Repository,
-		TargetRef: meta.TargetRef,
+		Repository:     identity.Repository,
+		TargetRef:      meta.TargetRef,
 		ResolvedCommit: meta.ResolvedCommit,
-		CurrentHead: head,
-		TrackingHead: trackingHead,
-		TrackedDirty: dirty,
-		Divergence: relation,
+		CurrentHead:    head,
+		CurrentBranch:  currentBranch,
+		Detached:       detached,
+		TrackingHead:   trackingHead,
+		TrackedDirty:   dirty,
+		Divergence:     relation,
 	}, nil
 }
 

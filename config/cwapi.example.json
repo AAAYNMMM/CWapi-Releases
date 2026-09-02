@@ -1,6 +1,6 @@
 {
   "schema": "cwapi.config.v3",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "mcp": {
     "port": 32124,
     "coding_token": "cwapi_coding_AAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -9,7 +9,8 @@
   "codex": {
     "executable": "",
     "access_profile": "safe",
-    "network_access": false
+    "network_access": false,
+    "remote_git_rewrite": false
   },
   "agent": {
     "enabled": true,

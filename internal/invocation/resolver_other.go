@@ -12,6 +12,6 @@ func New([]string) (*Resolver, error) {
 	return nil, errors.New("INVOCATION_PLATFORM_UNSUPPORTED")
 }
 
-func (r *Resolver) Resolve(string, processcontract.StartArguments) (Final, error) {
+func (r *Resolver) Resolve(string, processcontract.StartArguments, ...string) (Final, error) {
 	return Final{}, errors.New("INVOCATION_PLATFORM_UNSUPPORTED")
 }

@@ -42,6 +42,8 @@ type Result struct {
 	TargetRef      string
 	ResolvedCommit string
 	CurrentHead    string
+	CurrentBranch  string
+	Detached       bool
 	TrackedDirty   bool
 	Resumed        bool
 }
@@ -139,9 +141,14 @@ func (m *Manager) Prepare(ctx context.Context, input PrepareInput) (Result, erro
 		if err != nil {
 			return Result{}, err
 		}
+		currentBranch, detached, err := m.currentBranch(ctx, repoPath)
+		if err != nil {
+			return Result{}, err
+		}
 		return Result{
 			Repository: identity.Repository, Path: repoPath, TargetRef: targetRef,
-			ResolvedCommit: meta.ResolvedCommit, CurrentHead: head, TrackedDirty: dirty, Resumed: true,
+			ResolvedCommit: meta.ResolvedCommit, CurrentHead: head, CurrentBranch: currentBranch,
+			Detached: detached, TrackedDirty: dirty, Resumed: true,
 		}, nil
 	}
 
@@ -207,7 +214,7 @@ func (m *Manager) Prepare(ctx context.Context, input PrepareInput) (Result, erro
 		}
 	}
 
-	if _, err := m.mustGit(ctx, "-C", repoPath, "checkout", "--detach", resolved); err != nil {
+	if err := m.checkoutTrackingBranch(ctx, repoPath, branch, resolved); err != nil {
 		return Result{}, fmt.Errorf("WORKSPACE_SYNC_FAILED: %w", err)
 	}
 	head, err := m.head(ctx, repoPath)
@@ -224,6 +231,13 @@ func (m *Manager) Prepare(ctx context.Context, input PrepareInput) (Result, erro
 	if dirty {
 		return Result{}, errors.New("WORKSPACE_DIRTY_AFTER_SYNC")
 	}
+	currentBranch, detached, err := m.currentBranch(ctx, repoPath)
+	if err != nil {
+		return Result{}, err
+	}
+	if detached || currentBranch != branch {
+		return Result{}, errors.New("WORKSPACE_BRANCH_STATE_INVALID")
+	}
 	if err := saveMetadata(metadataPath, metadata{
 		Schema: metadataSchema, Repository: identity.Repository, NormalizedURL: identity.NormalizedURL,
 		TargetRef: targetRef, ResolvedCommit: resolved, UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
@@ -232,8 +246,42 @@ func (m *Manager) Prepare(ctx context.Context, input PrepareInput) (Result, erro
 	}
 	return Result{
 		Repository: identity.Repository, Path: repoPath, TargetRef: targetRef,
-		ResolvedCommit: resolved, CurrentHead: head, TrackedDirty: false,
+		ResolvedCommit: resolved, CurrentHead: head, CurrentBranch: currentBranch, Detached: false, TrackedDirty: false,
 	}, nil
+}
+
+func (m *Manager) checkoutTrackingBranch(ctx context.Context, repoPath, branch, resolved string) error {
+	localRef := "refs/heads/" + branch
+	localHead, code, err := m.runGit(ctx, "-C", repoPath, "rev-parse", "--verify", "--quiet", localRef+"^{commit}")
+	if code != 0 && code != 1 {
+		if err != nil {
+			return err
+		}
+		return errors.New("WORKSPACE_LOCAL_BRANCH_READ_FAILED")
+	}
+	localHead = strings.ToLower(strings.TrimSpace(localHead))
+	if localHead != "" {
+		if !fullCommitPattern.MatchString(localHead) {
+			return errors.New("WORKSPACE_LOCAL_BRANCH_INVALID")
+		}
+		if err := m.ensureNoLocalCommits(ctx, repoPath, localHead, resolved); err != nil {
+			return err
+		}
+		if _, err := m.mustGit(ctx, "-C", repoPath, "checkout", branch); err != nil {
+			return err
+		}
+		if localHead != resolved {
+			if _, err := m.mustGit(ctx, "-C", repoPath, "merge", "--ff-only", "refs/remotes/origin/"+branch); err != nil {
+				return err
+			}
+		}
+	} else {
+		if _, err := m.mustGit(ctx, "-C", repoPath, "checkout", "-b", branch, "--track", "refs/remotes/origin/"+branch); err != nil {
+			return err
+		}
+	}
+	_, err = m.mustGit(ctx, "-C", repoPath, "branch", "--set-upstream-to=origin/"+branch, branch)
+	return err
 }
 
 func (m *Manager) canonicalTargetRef(ctx context.Context, raw string) (string, string, error) {
@@ -353,6 +401,21 @@ func (m *Manager) head(ctx context.Context, repoPath string) (string, error) {
 	return head, nil
 }
 
+func (m *Manager) currentBranch(ctx context.Context, repoPath string) (string, bool, error) {
+	output, code, err := m.runGit(ctx, "-C", repoPath, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if code == 1 {
+		return "", true, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("WORKSPACE_BRANCH_READ_FAILED: %w", err)
+	}
+	branch := strings.TrimSpace(output)
+	if branch == "" {
+		return "", false, errors.New("WORKSPACE_BRANCH_INVALID")
+	}
+	return branch, false, nil
+}
+
 func (m *Manager) trackedDirty(ctx context.Context, repoPath string) (bool, error) {
 	output, err := m.mustGit(ctx, "-C", repoPath, "status", "--porcelain=v1", "--untracked-files=no")
 	if err != nil {
@@ -370,7 +433,7 @@ func (m *Manager) mustGit(ctx context.Context, args ...string) (string, error) {
 }
 
 func (m *Manager) runGit(ctx context.Context, args ...string) (string, int, error) {
-	gitArgs := append([]string{"-c", "core.longpaths=true"}, args...)
+	gitArgs := append([]string{"-c", "core.longpaths=true", "-c", "core.autocrlf=false"}, args...)
 	command := processlaunch.CommandContext(ctx, m.git, gitArgs...)
 	command.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=Never")
 	buffer := &boundedBuffer{limit: maxGitOutput}

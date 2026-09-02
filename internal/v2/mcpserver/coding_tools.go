@@ -27,6 +27,8 @@ type CodingOpenOutput struct {
 	TargetRef      string `json:"target_ref"`
 	ResolvedCommit string `json:"resolved_commit"`
 	CurrentHead    string `json:"current_head"`
+	CurrentBranch  string `json:"current_branch,omitempty"`
+	Detached       bool   `json:"detached,omitempty"`
 	TrackedDirty   bool   `json:"tracked_dirty"`
 	Resumed        bool   `json:"resumed"`
 	State          string `json:"state"`
@@ -34,7 +36,9 @@ type CodingOpenOutput struct {
 
 type CodingExecInput struct {
 	RepositoryURL  string   `json:"repository_url" jsonschema:"Git repository URL used to locate the repository's active Coding session"`
-	Command        string   `json:"command" jsonschema:"executable name or forward-slash path; do not include shell quoting"`
+	Action         string   `json:"action,omitempty" jsonschema:"run (default), start, status or stop; start creates a CWapi-managed persistent process"`
+	ProcessID      string   `json:"process_id,omitempty" jsonschema:"persistent process identifier required by status and stop"`
+	Command        string   `json:"command,omitempty" jsonschema:"executable name or forward-slash path for run/start; do not include shell quoting"`
 	Argv           []string `json:"argv,omitempty" jsonschema:"exact argument vector"`
 	CWD            string   `json:"cwd,omitempty" jsonschema:"optional forward-slash relative directory inside the prepared repository"`
 	TimeoutSeconds int      `json:"timeout_seconds,omitempty" jsonschema:"optional command timeout from 1 to 600 seconds"`
@@ -42,6 +46,9 @@ type CodingExecInput struct {
 
 type CodingExecOutput struct {
 	State     string `json:"state"`
+	ProcessID string `json:"process_id,omitempty"`
+	PID       int    `json:"pid,omitempty"`
+	StartedAt string `json:"started_at,omitempty"`
 	ExitCode  int    `json:"exit_code"`
 	Stdout    string `json:"stdout,omitempty"`
 	Stderr    string `json:"stderr,omitempty"`
@@ -58,6 +65,8 @@ type CodingStatusOutput struct {
 	TargetRef      string `json:"target_ref,omitempty"`
 	ResolvedCommit string `json:"resolved_commit,omitempty"`
 	CurrentHead    string `json:"current_head,omitempty"`
+	CurrentBranch  string `json:"current_branch,omitempty"`
+	Detached       bool   `json:"detached,omitempty"`
 	TrackingHead   string `json:"tracking_head,omitempty"`
 	TrackedDirty   bool   `json:"tracked_dirty,omitempty"`
 	Divergence     string `json:"divergence,omitempty"`
@@ -99,12 +108,19 @@ func RegisterCoding(server *mcp.Server, service CodingService) error {
 	})
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        ToolCodingExec,
-		Description: "Run one exact development command in the active workspace selected by repository_url. Pass the executable separately from an exact argv array; CWapi never starts a Codex thread/turn or uses a Codex account.",
+		Description: "Run one exact foreground command or manage a CWapi-owned persistent process in the active workspace. action defaults to run; use start with exact command/argv, then status or stop with process_id. CWapi never starts a Codex thread/turn or uses a Codex account.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, input CodingExecInput) (*mcp.CallToolResult, CodingExecOutput, error) {
 		input.RepositoryURL = strings.TrimSpace(input.RepositoryURL)
+		input.Action = strings.ToLower(strings.TrimSpace(input.Action))
+		input.ProcessID = strings.TrimSpace(input.ProcessID)
 		input.Command = strings.TrimSpace(input.Command)
 		input.CWD = strings.TrimSpace(input.CWD)
-		if input.RepositoryURL == "" || input.Command == "" {
+		if input.Action == "" {
+			input.Action = "run"
+		}
+		validStart := (input.Action == "run" || input.Action == "start") && input.Command != "" && input.ProcessID == ""
+		validControl := (input.Action == "status" || input.Action == "stop") && input.ProcessID != "" && input.Command == "" && len(input.Argv) == 0 && input.CWD == "" && input.TimeoutSeconds == 0
+		if input.RepositoryURL == "" || (!validStart && !validControl) {
 			return nil, CodingExecOutput{}, errors.New("CODING_EXEC_INPUT_INVALID")
 		}
 		output, err := service.Exec(ctx, input)

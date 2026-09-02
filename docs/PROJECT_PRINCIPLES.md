@@ -10,7 +10,7 @@
 
 - one executable, one MCP listener, two isolated app routes；
 - Coding 与 Agent 只保留各自当前所需的 runtime state，不引入额外业务模式状态机；
-- use upstream Codex sandboxing for OS isolation while CWapi enforces its permanent command policy on the resolved executable/argv/CWD；
+- SAFE uses upstream Codex sandboxing for workspace isolation; FULL uses the current user's sanitized development environment; CWapi's permanent guard protects only catastrophic and internal-trust boundaries；
 - durable workspace is the only Coding mutable source of truth；
 - Agent is a bounded text/tool control bridge, not a file-transfer, media-transfer, bulk-sync or long-term storage channel；
 - Desktop state is factual and bounded；
@@ -28,6 +28,6 @@
 
 ## Change control
 
-2.0.3 uses strict `cwapi.config.v3 / 2.0.3`; mismatched config is rejected rather than migrated implicitly.
+2.0.4 retains schema `cwapi.config.v3`. A strict valid 2.0.3 config is migrated atomically with Remote Git Rewrite disabled; unrelated schema/version mismatches remain rejected.
 
 Routine development may create commits and test-only `refs/heads/cwapi-e2e/*` branches when a guarded E2E explicitly requires them. Merge to `main`, tag, Release, force-push and remote test-ref deletion require explicit user authorization.

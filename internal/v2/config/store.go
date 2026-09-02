@@ -51,9 +51,37 @@ func LoadOrCreate(path string) (Config, error) {
 		return cfg, nil
 	}
 	if !errors.Is(err, os.ErrNotExist) {
+		if migrated, migrateErr := migratePrevious(path); migrateErr == nil {
+			return migrated, nil
+		}
+	}
+	if !errors.Is(err, os.ErrNotExist) {
 		return Config{}, err
 	}
 	cfg = Default()
+	if err := SaveAtomic(path, cfg); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+func migratePrevious(path string) (Config, error) {
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		return Config{}, err
+	}
+	if len(payload) > maxConfigBytes {
+		return Config{}, errors.New("CONFIG_TOO_LARGE")
+	}
+	var cfg Config
+	if err := decodeStrict(payload, &cfg); err != nil {
+		return Config{}, err
+	}
+	if cfg.Schema != Schema || cfg.Version != previousVersion {
+		return Config{}, errors.New("CONFIG_MIGRATION_NOT_APPLICABLE")
+	}
+	cfg.Version = Version
+	cfg.Codex.RemoteGitRewrite = false
 	if err := SaveAtomic(path, cfg); err != nil {
 		return Config{}, err
 	}

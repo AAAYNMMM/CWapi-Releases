@@ -74,6 +74,22 @@ func NewLazy(manager *workspace.Manager, dataRoot string, cfg v2config.CodexConf
 		currentConfig = candidate
 		return nil
 	}
+	setRemoteGitRewrite := func(allowed bool) error {
+		hostMu.Lock()
+		defer hostMu.Unlock()
+		candidate := currentConfig
+		candidate.RemoteGitRewrite = allowed
+		if err := v2config.ValidateCodex(candidate); err != nil {
+			return err
+		}
+		if host != nil {
+			if err := host.SetRemoteGitRewrite(allowed); err != nil {
+				return err
+			}
+		}
+		currentConfig = candidate
+		return nil
+	}
 	execute := func(ctx context.Context, path string, input codextoolhost.ExecInput) (codextoolhost.ExecResult, error) {
 		current, err := resolve()
 		if err != nil {
@@ -90,5 +106,24 @@ func NewLazy(manager *workspace.Manager, dataRoot string, cfg v2config.CodexConf
 	}
 	service.setAccessProfile = setAccessProfile
 	service.setNetworkAccess = setNetworkAccess
+	service.setRemoteGitRewrite = setRemoteGitRewrite
+	service.stopProcesses = func(ctx context.Context, path string) error {
+		hostMu.Lock()
+		current := host
+		hostMu.Unlock()
+		if current == nil {
+			return nil
+		}
+		return current.StopWorkspace(ctx, path)
+	}
+	service.closeRuntime = func(ctx context.Context) error {
+		hostMu.Lock()
+		current := host
+		hostMu.Unlock()
+		if current == nil {
+			return nil
+		}
+		return current.Close(ctx)
+	}
 	return service, nil
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/AAAYNMMM/CWapi/internal/repository"
 	"github.com/AAAYNMMM/CWapi/internal/v2/codextoolhost"
@@ -20,20 +21,24 @@ type prepareFunc func(context.Context, workspace.PrepareInput) (workspace.Result
 type inspectFunc func(context.Context, string) (workspace.Snapshot, error)
 type execFunc func(context.Context, string, codextoolhost.ExecInput) (codextoolhost.ExecResult, error)
 type readyFunc func() error
+type stopProcessesFunc func(context.Context, string) error
 
 type Service struct {
 	mu sync.RWMutex
 
-	prepare          prepareFunc
-	inspect          inspectFunc
-	execute          execFunc
-	ready            readyFunc
-	setAccessProfile func(string) error
-	setNetworkAccess func(bool) error
-	sessions         map[string]*record
-	active           map[string]string
-	opening          map[string]*openingRecord
-	closed           bool
+	prepare             prepareFunc
+	inspect             inspectFunc
+	execute             execFunc
+	ready               readyFunc
+	setAccessProfile    func(string) error
+	setNetworkAccess    func(bool) error
+	setRemoteGitRewrite func(bool) error
+	stopProcesses       stopProcessesFunc
+	closeRuntime        func(context.Context) error
+	sessions            map[string]*record
+	active              map[string]string
+	opening             map[string]*openingRecord
+	closed              bool
 }
 
 type openingRecord struct {
@@ -50,6 +55,8 @@ type record struct {
 	targetRef      string
 	resolvedCommit string
 	currentHead    string
+	currentBranch  string
+	detached       bool
 	trackedDirty   bool
 	resumed        bool
 	busy           bool
@@ -77,6 +84,9 @@ func New(manager *workspace.Manager, host *codextoolhost.Host) (*Service, error)
 	}
 	service.setAccessProfile = host.SetAccessProfile
 	service.setNetworkAccess = host.SetNetworkAccess
+	service.setRemoteGitRewrite = host.SetRemoteGitRewrite
+	service.stopProcesses = host.StopWorkspace
+	service.closeRuntime = host.Close
 	return service, nil
 }
 
@@ -124,6 +134,23 @@ func (s *Service) SetNetworkAccess(allowed bool) error {
 	}
 	if setter == nil {
 		return errors.New("CODING_NETWORK_ACCESS_UNAVAILABLE")
+	}
+	return setter(allowed)
+}
+
+func (s *Service) SetRemoteGitRewrite(allowed bool) error {
+	if s == nil {
+		return errors.New("CODING_SERVICE_UNAVAILABLE")
+	}
+	s.mu.RLock()
+	closed := s.closed
+	setter := s.setRemoteGitRewrite
+	s.mu.RUnlock()
+	if closed {
+		return errors.New("CODING_SERVICE_CLOSED")
+	}
+	if setter == nil {
+		return errors.New("CODING_REMOTE_GIT_REWRITE_UNAVAILABLE")
 	}
 	return setter(allowed)
 }
@@ -205,6 +232,7 @@ func (s *Service) Open(ctx context.Context, input mcpserver.CodingOpenInput) (mc
 		repository: prepared.Repository, repositoryURL: identity.NormalizedURL, path: prepared.Path,
 		targetRef: prepared.TargetRef, resolvedCommit: prepared.ResolvedCommit,
 		currentHead: prepared.CurrentHead, trackedDirty: prepared.TrackedDirty, resumed: prepared.Resumed,
+		currentBranch: prepared.CurrentBranch, detached: prepared.Detached,
 	}
 	s.active[repositoryKey] = codingID
 	s.mu.Unlock()
@@ -212,6 +240,7 @@ func (s *Service) Open(ctx context.Context, input mcpserver.CodingOpenInput) (mc
 	return mcpserver.CodingOpenOutput{
 		Repository: prepared.Repository, TargetRef: prepared.TargetRef,
 		ResolvedCommit: prepared.ResolvedCommit, CurrentHead: prepared.CurrentHead,
+		CurrentBranch: prepared.CurrentBranch, Detached: prepared.Detached,
 		TrackedDirty: prepared.TrackedDirty, Resumed: prepared.Resumed, State: "ready",
 	}, nil
 }
@@ -243,6 +272,7 @@ func (s *Service) resumeActiveLocked(input mcpserver.CodingOpenInput, owner stri
 	return mcpserver.CodingOpenOutput{
 		Repository: record.repository, TargetRef: record.targetRef,
 		ResolvedCommit: record.resolvedCommit, CurrentHead: record.currentHead,
+		CurrentBranch: record.currentBranch, Detached: record.detached,
 		TrackedDirty: record.trackedDirty, Resumed: true, State: state,
 	}, nil
 }
@@ -270,13 +300,14 @@ func (s *Service) Exec(ctx context.Context, input mcpserver.CodingExecInput) (mc
 	defer finish()
 
 	result, err := s.execute(commandCtx, record.path, codextoolhost.ExecInput{
-		Command: input.Command, Argv: input.Argv, CWD: input.CWD, TimeoutSeconds: input.TimeoutSeconds,
+		Action: input.Action, ProcessID: input.ProcessID, Command: input.Command,
+		Argv: input.Argv, CWD: input.CWD, TimeoutSeconds: input.TimeoutSeconds,
 	})
 	if err != nil {
 		return mcpserver.CodingExecOutput{}, err
 	}
 	return mcpserver.CodingExecOutput{
-		State: result.State, ExitCode: result.ExitCode,
+		State: result.State, ProcessID: result.ProcessID, PID: result.PID, StartedAt: result.StartedAt, ExitCode: result.ExitCode,
 		Stdout: result.Stdout, Stderr: result.Stderr, Truncated: result.Truncated,
 	}, nil
 }
@@ -325,6 +356,7 @@ func (s *Service) Status(ctx context.Context, input mcpserver.CodingStatusInput)
 		State: state, Repository: record.repository,
 		TargetRef: record.targetRef, ResolvedCommit: record.resolvedCommit,
 		CurrentHead: record.currentHead, TrackedDirty: record.trackedDirty,
+		CurrentBranch: record.currentBranch, Detached: record.detached,
 	}
 	if busy || s.inspect == nil {
 		return output, nil
@@ -337,6 +369,8 @@ func (s *Service) Status(ctx context.Context, input mcpserver.CodingStatusInput)
 	output.TargetRef = workspaceState.TargetRef
 	output.ResolvedCommit = workspaceState.ResolvedCommit
 	output.CurrentHead = workspaceState.CurrentHead
+	output.CurrentBranch = workspaceState.CurrentBranch
+	output.Detached = workspaceState.Detached
 	output.TrackingHead = workspaceState.TrackingHead
 	output.TrackedDirty = workspaceState.TrackedDirty
 	output.Divergence = workspaceState.Divergence
@@ -406,13 +440,22 @@ func (s *Service) Close(ctx context.Context, input mcpserver.CodingCloseInput) (
 		case <-ctx.Done():
 			go func() {
 				<-done
+				if s.stopProcesses != nil {
+					stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					_ = s.stopProcesses(stopCtx, record.path)
+					cancel()
+				}
 				s.finalizeClose(codingID, record)
 			}()
 			return mcpserver.CodingCloseOutput{}, fmt.Errorf("CODING_CLOSE_TIMEOUT: %w", ctx.Err())
 		}
 	}
+	var stopErr error
+	if s.stopProcesses != nil {
+		stopErr = s.stopProcesses(ctx, record.path)
+	}
 	s.finalizeClose(codingID, record)
-	return mcpserver.CodingCloseOutput{Repository: repositoryKey, State: "closed"}, nil
+	return mcpserver.CodingCloseOutput{Repository: repositoryKey, State: "closed"}, stopErr
 }
 func (s *Service) finalizeClose(codingID string, record *record) {
 	s.mu.Lock()
@@ -457,27 +500,33 @@ func (s *Service) CloseAll(ctx context.Context) error {
 	s.active = make(map[string]string)
 	s.opening = make(map[string]*openingRecord)
 	s.mu.Unlock()
+	var closeErr error
 	for _, opening := range openings {
 		select {
 		case <-opening.done:
 		case <-ctx.Done():
-			return fmt.Errorf("CODING_CLOSE_ALL_TIMEOUT: %w", ctx.Err())
+			closeErr = errors.Join(closeErr, fmt.Errorf("CODING_CLOSE_ALL_TIMEOUT: %w", ctx.Err()))
 		}
 	}
 	for _, record := range records {
 		record.mu.Lock()
 		done := record.done
 		record.mu.Unlock()
-		if done == nil {
-			continue
+		if done != nil {
+			select {
+			case <-done:
+			case <-ctx.Done():
+				closeErr = errors.Join(closeErr, fmt.Errorf("CODING_CLOSE_ALL_TIMEOUT: %w", ctx.Err()))
+			}
 		}
-		select {
-		case <-done:
-		case <-ctx.Done():
-			return fmt.Errorf("CODING_CLOSE_ALL_TIMEOUT: %w", ctx.Err())
+		if s.stopProcesses != nil {
+			closeErr = errors.Join(closeErr, s.stopProcesses(ctx, record.path))
 		}
 	}
-	return nil
+	if s.closeRuntime != nil {
+		closeErr = errors.Join(closeErr, s.closeRuntime(ctx))
+	}
+	return closeErr
 }
 
 func (s *Service) lookupRepository(repositoryURL string) (string, *record, error) {

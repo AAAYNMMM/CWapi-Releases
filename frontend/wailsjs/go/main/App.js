@@ -16,3 +16,5 @@ export function RuntimeSnapshot() { return window['go']['main']['App']['RuntimeS
 export function SetAgentEnabled(arg1) { return window['go']['main']['App']['SetAgentEnabled'](arg1); }
 export function UpdateCodexAccessProfile(arg1) { return window['go']['main']['App']['UpdateCodexAccessProfile'](arg1); }
 export function UpdateCodexNetworkAccess(arg1) { return window['go']['main']['App']['UpdateCodexNetworkAccess'](arg1); }
+
+export function UpdateCodexRemoteGitRewrite(arg1) { return window['go']['main']['App']['UpdateCodexRemoteGitRewrite'](arg1); }

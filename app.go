@@ -64,7 +64,7 @@ func (a *App) startup(ctx context.Context) {
 	a.startupErr = err
 	a.mu.Unlock()
 	if err != nil {
-		fmt.Println("CWapi 2.0.3 startup degraded:", err.Error())
+		fmt.Println("CWapi 2.0.4 startup degraded:", err.Error())
 	}
 
 	a.tray = tray.New(a.showMainWindow, a.requestShutdown)
@@ -306,6 +306,14 @@ func (a *App) UpdateCodexNetworkAccess(allowed bool) (v2service.Snapshot, error)
 		return a.RuntimeSnapshot(), err
 	}
 	return current.UpdateCodexNetworkAccess(allowed)
+}
+
+func (a *App) UpdateCodexRemoteGitRewrite(allowed bool) (v2service.Snapshot, error) {
+	current, err := a.core()
+	if err != nil {
+		return a.RuntimeSnapshot(), err
+	}
+	return current.UpdateCodexRemoteGitRewrite(allowed)
 }
 
 func (a *App) SetAgentEnabled(enabled bool) (v2service.Snapshot, error) {

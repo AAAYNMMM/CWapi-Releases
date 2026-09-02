@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	Schema  = "cwapi.config.v3"
-	Version = "2.0.3"
+	Schema          = "cwapi.config.v3"
+	Version         = "2.0.4"
+	previousVersion = "2.0.3"
 
 	DefaultMCPPort   = 32124
 	DefaultAgentPort = 32123
@@ -36,9 +37,10 @@ type MCPConfig struct {
 }
 
 type CodexConfig struct {
-	Executable    string `json:"executable"`
-	AccessProfile string `json:"access_profile"`
-	NetworkAccess bool   `json:"network_access"`
+	Executable       string `json:"executable"`
+	AccessProfile    string `json:"access_profile"`
+	NetworkAccess    bool   `json:"network_access"`
+	RemoteGitRewrite bool   `json:"remote_git_rewrite"`
 }
 
 type AgentConfig struct {

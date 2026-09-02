@@ -8,14 +8,15 @@ CWapi uses the bundled official `codex.exe app-server` only as a model-free deve
 Web GPT
   -> Coding MCP coding_exec
   -> CWapi final executable/argv/CWD resolution
-  -> permanent executionpolicy.Check
+  -> Permanent Safety Guard
+  -> SAFE/FULL profile + optional capabilities
   -> private codex.exe app-server
   -> command/exec
   -> Codex code-mode host / Windows sandbox
   -> bounded stdout/stderr result
 ```
 
-`coding_open` prepares and reserves the durable Git workspace. `coding_exec` is the only Coding execution operation. The Web GPT remains the planner: it calls `rg`, PowerShell, Git, compilers and test runners through exact `command + argv` requests.
+`coding_open` prepares and reserves the durable Git workspace. `coding_exec` remains the only Coding execution operation; its compatible foreground `run` plus additive `start/status/stop` actions cover bounded commands and CWapi-owned persistent processes. The Web GPT remains the planner: it calls `rg`, PowerShell, Git, compilers and test runners through exact `command + argv` requests.
 
 ## Account isolation
 
@@ -32,7 +33,7 @@ CWapi calls only app-server initialization, Windows sandbox readiness/setup, and
 - verify: compilers, linters and tests；
 - Git: bundled MinGit is added to the private command PATH。
 
-The remote command and CWD use forward-slash syntax and are resolved to a real executable and a directory inside the prepared repository. Output tails are bounded before returning through MCP.
+The remote command and CWD use forward-slash syntax and are resolved to a real executable and a directory inside the prepared repository. Batch bridges are created only at `CWapi-data/runtime/process/<process-id>/bridge/bridge.cmd`; repository contents cannot replace them. Output tails are bounded before returning through MCP.
 
 ## Sandbox mapping
 
@@ -41,7 +42,11 @@ safe command                       -> command/exec workspaceWrite
 full, every permitted command      -> command/exec dangerFullAccess
 ```
 
-CWapi checks the resolved top-level target before `StartCommand`; permanent denials are profile-independent. Runtime roots are physically confined beneath the workspace before host-side Temp/cache creation. SAFE commands receive workspace-local Temp/cache/profile directories, isolated Git configuration and default-off network access. FULL sends every permanently permitted command through `dangerFullAccess` and restores the current Windows user profile/AppData environment. Guarded Git metadata operations still require the trusted bounded-PATH Git and argument validation. Direct FULL push additionally requires the independent network capability, rejects force/delete/custom receive-pack/local transports, limits Git transport to HTTPS/SSH, and is the only path that restores host Git configuration/credential-helper discovery. Both profiles use the private empty CODEX_HOME and never enable a Codex account.
+CWapi checks the resolved top-level target before `StartCommand`; permanent denials are profile-independent and limited to catastrophic disk/boot/elevation behavior, protected CWapi internals, trusted-Git identity and unsafe remote Git transports. SAFE commands receive command-scoped Temp/profile plus reusable cache paths at `CWapi-data/runtime/workspaces/<hash>/cache`; host Git/npm/GitHub identity is isolated. FULL sends every permitted command through `dangerFullAccess`, starts from the current Windows user environment, strips CWapi/OpenAI/Codex internal secrets and keeps normal developer configuration. Neither profile writes `.cwapi-runtime` or `.cwapi-process-bridge.cmd` into a repository.
+
+Network access is an independent capability in both profiles. Remote Git Rewrite is another independent capability and defaults OFF. OFF denies direct force/delete push forms; ON admits those forms but still rejects receive-pack injection, local/ext push transports, `refs/cwapi/*` publication and internal path abuse. Direct local-destructive Git operations create bounded recovery refs before execution when possible. Both profiles use the private empty CODEX_HOME and never enable a Codex account.
+
+Foreground commands own an app-server command/job lifetime and clean the entire tree on completion, cancellation or timeout. Persistent start transfers that ownership to the Host process manager; status is non-blocking, stop closes the owned job, and workspace close/app shutdown stop all matching processes. Process metadata and bridge state remain command-scoped under `CWapi-data/runtime/process`.
 
 ## Runtime integrity
 

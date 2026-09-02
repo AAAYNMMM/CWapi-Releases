@@ -1,6 +1,24 @@
 # Changelog
 
-## 2.0.3 — 2026-09-01
+## 2.0.4 — 2026-09-02
+
+2.0.4 将 Coding 安全管理从集中式命令特判重构为明确的分层边界：
+
+- 新增 `internal/security`，按 Permanent Safety Guard、SAFE/FULL profile、Network/Remote Git Rewrite capabilities 与 execution 分责；`executionpolicy` 只保留兼容 facade；
+- Permanent Guard 缩减为磁盘/启动、自动提权、CWapi 敏感内部路径、可信 Git、unsafe push transport/receive-pack/safety-ref 等灾难级保护；移除普通进程控制、credential plumbing、正常 Git 参数与 shell 文本语义黑名单；
+- SAFE 保持 Codex `workspaceWrite`、隔离身份与配置；Go/npm/pip/Cargo/Gradle/XDG cache 改为 workspace 生命周期，Temp/profile/bridge 保持 command 生命周期；
+- FULL 使用 `dangerFullAccess`，从宿主 Windows 用户环境开始仅剥离 CWapi/OpenAI/Codex 内部 secret，恢复正常 Git/GitHub CLI/SSH/hooks/signing、npm/pip/Cargo/Gradle 与 SDK/toolchain 行为；
+- GitHub CLI identity 统一迁移到 `CWapi-data/auth/github`，跨命令、跨 Coding workspace 复用；runtime/cache/bridge 全部移到 `CWapi-data`，不再污染 Git working tree；
+- 正常 Git 改为 denylist 语义并支持 `git -C`、branch rename、signed/annotated tags、amend 与脚本内调用；Remote Git Rewrite 作为默认 OFF 的独立高级能力，继续保护 force/delete remote history；
+- direct local-destructive Git 操作前创建有界 `refs/cwapi/safety/*` recovery refs；workspace prepare 改为 local tracking branch，并继续拒绝隐式覆盖 dirty/local/diverged history；
+- `coding_exec` 保持默认 foreground `run` 兼容，并新增 `start/status/stop` persistent process 生命周期；foreground、workspace close 与 app shutdown 都有明确进程树回收；
+- config schema 保持 `cwapi.config.v3`，valid 2.0.3 config 原子迁移到 2.0.4 且 Remote Git Rewrite 默认关闭；GUI、协议、文档、测试与 package metadata 同步为 2.0.4。
+
+发行包对应开发仓库源码提交：
+
+```text
+7b5e51725f6f253f957237ce6847e7e2f32f08a1
+```\n\n## 2.0.3 — 2026-09-01
 
 2.0.3 将 Agent 外部协议转换从 broker/runtime 核心中抽离，并建立轻量的正式协议边界：
 

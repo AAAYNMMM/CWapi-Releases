@@ -1,10 +1,10 @@
-# CWapi 2.0 Operations
+# CWapi 2.0.4 Operations
 
 ## Start
 
 Extract the portable to any user-writable directory and run `CWapi.exe`. No Go, Node, Git or Wails installation is required. The first launch creates `CWapi-data/config/cwapi.json` and starts the loopback MCP listener plus the Agent Provider when enabled. Each bundled OpenAI Secure MCP Tunnel starts only after its own configuration is complete.
 
-Coding uses the bundled Codex app-server only for model-free `command/exec` and creates a private empty CODEX_HOME per command. No Codex login is needed. SAFE does not inherit the current user's Git/GitHub credential setup; an authorized direct FULL push can use it only when Coding network access is explicitly enabled.
+Coding uses the bundled Codex app-server only for model-free `command/exec` and creates a private empty CODEX_HOME per command. No Codex login is needed. SAFE does not inherit the host Git/GitHub setup. FULL uses the current user's sanitized development environment. GitHub CLI state is shared by all Coding workspaces at `CWapi-data/auth/github`; authenticate once with `gh auth login` and keep token storage in Windows Credential Manager/keyring where supported.
 
 ## Connect
 
@@ -42,7 +42,7 @@ Model:    cwapi-web-gpt
 
 ## Images and files
 
-CWapi 2.0.3 does not provide file or image transfer.
+CWapi 2.0.4 does not provide file or image transfer.
 
 For Coding, read source, Markdown, JSON, logs and other inspectable text through bounded `coding_exec`; there is no attachment tool.
 
@@ -54,16 +54,20 @@ A file or image uploaded in the ChatGPT conversation is never written into the l
 
 ## Access profile
 
-- SAFE: ordinary source inspection, edits and tests under `workspaceWrite`, isolated caches/profile/Git configuration and the independently selected network capability；
-- FULL: every command that passes CWapi permanent policy runs with `dangerFullAccess` and the current Windows user profile/AppData environment. Permanent destructive-Git, credential and forbidden-tool rules still apply; direct `git push` additionally requires network access and is the only path that restores host Git config/credential-helper discovery。
+- SAFE: source inspection, edits and tests under `workspaceWrite`, a synthetic profile, isolated host configuration and workspace-lifetime caches. SAFE is the profile that limits Agent reach outside the owned workspace；
+- FULL: every command that passes the small permanent catastrophic guard runs with `dangerFullAccess` and the current Windows user's sanitized development environment. Normal Git, GitHub CLI, SDK, package-manager, hook, signing and process-control behavior is available. FULL is not a shell-language sandbox；
+- Network: independent OFF/ON capability for both profiles；
+- Remote Git Rewrite: independent advanced OFF/ON capability. It defaults OFF and controls direct force/delete remote updates only。
 
-SAFE/FULL and Coding network access may be switched while Coding sessions remain open. An already running coding_exec keeps the sandbox/network selected when that command started; the next coding_exec uses the new settings. FULL push requires network access. Other service-restart configuration mutations remain blocked while Coding work is active.
+SAFE/FULL, Coding network access and Remote Git Rewrite may be switched while Coding sessions remain open. An already running `coding_exec` keeps the capabilities selected when it started; the next execution uses the new settings. Remote operations require network access. Other service-restart configuration mutations remain blocked while Coding work is active.
+
+Foreground `coding_exec` remains bounded and cleans its process tree when it completes, times out or is cancelled. For a development server, watcher, GUI or browser-auth flow, use `action=start`; retain the returned `process_id`, inspect it with `action=status`, and terminate it with `action=stop`. Closing the workspace session or exiting CWapi also stops its persistent processes. Persistent output is bounded and status polling is non-blocking.
 
 ## Workspace recovery
 
 An interrupted Coding task leaves the durable workspace intact. A ChatGPT conversation ending does not automatically close the CWapi Coding session. If the same repository already has an active session, a new conversation should call compatible `coding_open(..., resume=true)`; CWapi reuses the active internal session without preparing a second workspace or requiring a public session ID.
 
-`resume=false` against an active repository still returns `CODING_WORKSPACE_BUSY`. A clean workspace with metadata interrupted during write is repaired by the next non-resume `coding_open`; resume still refuses to guess a corrupt context. Use the Desktop maintenance overlay only when the repository should be deleted/rebuilt; this loses uncommitted local work in that selected workspace.
+`resume=false` against an active repository still returns `CODING_WORKSPACE_BUSY`. New preparation checks out or creates the local target branch with origin tracking and only fast-forwards a clean branch with no local/diverged commits. Dirty work and local history are never reset implicitly. Direct local-destructive Git commands create bounded `refs/cwapi/safety/*` recovery refs when possible. A clean workspace with metadata interrupted during write is repaired by the next non-resume `coding_open`; resume still refuses to guess a corrupt context. Use the Desktop maintenance overlay only when the repository and its corresponding runtime cache should be deleted/rebuilt; this loses uncommitted local work in that selected workspace.
 
 ## Move or upgrade
 
@@ -79,7 +83,9 @@ Before replacing a version, close active sessions and back up any unpushed works
 - OpenAI Tunnel failed after automatic retries: inspect the GUI state and reconnect; do not put the Runtime API key into `cwapi.json` or an environment file；
 - Codex unavailable: verify the bundled runtime lock/hash and Windows sandbox readiness；
 - private clone fails: verify the CWapi workspace manager's current-user GitHub credentials；
-- FULL push fails with `CODING_NETWORK_ACCESS_REQUIRED`: enable Coding network access explicitly, then retry the direct `git push`；
+- remote Git/network command fails: enable Coding network access, then retry；
+- force/delete push fails with `REMOTE_GIT_REWRITE_DISABLED`: enable the advanced Remote Git Rewrite capability only when that exact remote history change is intended；
+- persistent command returns a terminal state: stop polling that process ID and advance the task；
 - `AGENT_FILE_ATTACHMENTS_UNSUPPORTED`: local Agent software attempted file transfer; file transfer is disabled；
 - `AGENT_MEDIA_INPUT_UNSUPPORTED`: local Agent software attempted image or other non-text message content; media transfer is disabled；
 - Agent 503: open Agent MCP bridge；

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/AAAYNMMM/CWapi/internal/repository"
+	"github.com/AAAYNMMM/CWapi/internal/security"
 )
 
 // DeleteAt removes exactly one durable repository workspace. It does not try
@@ -41,8 +42,27 @@ func DeleteAt(dataRoot, repositoryName string) error {
 	if meta.Repository != identity.Repository {
 		return errors.New("WORKSPACE_METADATA_REPOSITORY_MISMATCH")
 	}
+	repoPath := filepath.Join(container, "repo")
+	runtimeRoot, err := security.WorkspaceRuntimeRoot(filepath.Clean(dataRoot), repoPath)
+	if err != nil {
+		return err
+	}
+	runtimeBase := filepath.Join(filepath.Clean(dataRoot), "runtime", "workspaces")
+	if !security.PathWithin(runtimeRoot, runtimeBase) {
+		return errors.New("WORKSPACE_RUNTIME_PATH_INVALID")
+	}
 	if err := os.RemoveAll(container); err != nil {
 		return errors.New("WORKSPACE_DELETE_FAILED")
+	}
+	if runtimeInfo, runtimeErr := os.Lstat(runtimeRoot); runtimeErr == nil {
+		if runtimeInfo.Mode()&os.ModeSymlink != 0 || !runtimeInfo.IsDir() {
+			return errors.New("WORKSPACE_RUNTIME_PATH_INVALID")
+		}
+		if err := os.RemoveAll(runtimeRoot); err != nil {
+			return errors.New("WORKSPACE_RUNTIME_DELETE_FAILED")
+		}
+	} else if !errors.Is(runtimeErr, os.ErrNotExist) {
+		return errors.New("WORKSPACE_RUNTIME_DELETE_FAILED")
 	}
 	return nil
 }

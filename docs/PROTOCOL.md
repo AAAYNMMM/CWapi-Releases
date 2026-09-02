@@ -66,6 +66,7 @@ coding_close
 ```json
 {
   "repository_url":"https://github.com/owner/repo",
+  "action":"run",
   "command":"go",
   "argv":["test","./..."],
   "cwd":"optional/relative/path",
@@ -73,9 +74,9 @@ coding_close
 }
 ```
 
-返回 `state,exit_code,stdout,stderr,truncated`。CWapi 将 `repository_url` 规范化后定位当前 active internal session。同一 internal session 同时只允许一个 active operation。`command` 与 `cwd` 的远端 path syntax 只接受 `/`；argv 逐项传递，不做 shell 拼接。命令默认超时 120 秒，显式 `timeout_seconds` 范围为 1–600 秒，以容纳 clean-install/build gate。
+省略 `action` 等价于兼容的 foreground `run`，返回 `state,exit_code,stdout,stderr,truncated`。`action=start` 启动 persistent process，并立即返回 `state=running,process_id,pid,started_at`；后续 `action=status` / `action=stop` 只需 `repository_url,process_id`，其调用有界且非阻塞。最多 16 个 persistent process；workspace close 与应用退出会停止其进程树。CWapi 将 `repository_url` 规范化后定位当前 active internal session。同一 internal session 同时只允许一个 active operation。`command` 与 `cwd` 的远端 path syntax 只接受 `/`；argv 逐项传递，不做 shell 拼接。foreground 命令默认超时 120 秒，显式 `timeout_seconds` 范围为 1–600 秒；persistent start 不接受 timeout。
 
-调用固定进入 bundled private Codex app-server 的 model-free `command/exec`。它不创建 thread/turn，不调用 Codex agent、auth、account 或 model API。CWapi 在启动前检查解析后的最终 executable/argv/CWD。SAFE 使用 `workspaceWrite` 与命令级隔离环境；FULL 对所有通过永久策略的命令使用 `dangerFullAccess` 并恢复当前 Windows 用户 profile/AppData。网络能力独立、默认关闭；直接 FULL push 必须显式启用网络，且只有该路径恢复宿主 Git config/credential helper。
+调用固定进入 bundled private Codex app-server 的 model-free `command/exec`。它不创建 thread/turn，不调用 Codex agent、auth、account 或 model API。CWapi 在启动前检查解析后的最终 executable/argv/CWD。SAFE 使用 `workspaceWrite`、合成 profile、隔离配置与 workspace-lifetime cache；FULL 使用 `dangerFullAccess` 和剥离内部 secret 后的当前 Windows 用户开发环境。网络能力独立、默认关闭。Remote Git Rewrite 也是独立、默认关闭的高级能力，只放开 direct force/delete remote updates；危险 transport、receive-pack 注入、CWapi safety refs 与内部路径始终拒绝。
 
 源码、Markdown、JSON、日志、配置等 workspace 内容通过 `coding_exec` 的 exact 读取命令交付给 Web GPT，而不是实例化成 ChatGPT 文件资源。
 
@@ -85,7 +86,7 @@ coding_close
 {"repository_url":"https://github.com/owner/repo"}
 ```
 
-返回 `state,repository,target_ref,resolved_commit,current_head,tracking_head,tracked_dirty,divergence,last_error`。该操作不 fetch，也不返回 Codex transcript。repository 没有 active session 时返回明确的 not-active 错误。
+返回 `state,repository,target_ref,resolved_commit,current_head,current_branch,detached,tracking_head,tracked_dirty,divergence,last_error`。该操作不 fetch，也不返回 Codex transcript。repository 没有 active session 时返回明确的 not-active 错误。
 
 ### `coding_close`
 
@@ -178,7 +179,7 @@ POST /v1/chat/completions
 
 默认 model 为 `cwapi-web-gpt`。HTTP request body 上限 1 MiB；单个 broker request 与每次 exchange 总 JSON payload 上限为 1 MiB。最大 active queue 16；默认整体 timeout 180 秒。没有 bridge 返回 503 `AGENT_BRIDGE_UNAVAILABLE`，queue 满返回 429 `AGENT_BUSY`，timeout 返回 504 `AGENT_REQUEST_TIMEOUT`。
 
-2.0.3 的 Provider 不再把外部 JSON 直接交给 broker。正式转换链是：
+2.0.4 的 Provider 不把外部 JSON 直接交给 broker。正式转换链是：
 
 ```text
 local Agent software
@@ -201,7 +202,7 @@ Provider 接受标准顶层 `metadata` object（最多 32 项；key 最长 64 �
 
 ## File and media transport boundary
 
-CWapi 2.0.3 不提供文件或图片传输。
+CWapi 2.0.4 不提供文件或图片传输。
 
 ### Coding
 

@@ -42,7 +42,7 @@ Continue all later Coding calls with the same `repository_url`. Do not open a se
 
 ### Files and images
 
-CWapi 2.0.3 does not transfer files or images through Coding MCP. There is no attachment tool and the MCP layer does not emit `ImageContent` or `EmbeddedResource`.
+CWapi 2.0.4 does not transfer files or images through Coding MCP. There is no attachment tool and the MCP layer does not emit `ImageContent` or `EmbeddedResource`.
 
 Read source, Markdown, JSON, logs, configuration and other text directly through `coding_exec`, using exact tools such as `rg`, `git show`, PowerShell text reads or repository-specific commands. Prefer bounded, relevant output rather than moving whole files when only part of a file is needed.
 
@@ -50,7 +50,11 @@ Read source, Markdown, JSON, logs, configuration and other text directly through
 
 Inspect before editing. When several reads/searches are independent, prefer one information-rich command or a small number of grouped commands instead of many tiny round trips. Do not repeatedly re-read unchanged files without new evidence. After edits, verify with the narrowest useful test first, then broaden validation when needed. Use `coding_status` when Git/workspace truth is actually needed rather than after every small action.
 
-Use SAFE for normal read/edit/test work. If the requested task includes add/commit/push, the local operator must select FULL before that direct Git metadata operation; wrappers and unrelated commands remain `workspaceWrite`. Network access is selected independently and must be explicitly enabled for FULL push. Destructive Git operations, credential extraction, remote-ref deletion and force-push are not available through Coding.
+Use SAFE when the task should remain confined to the owned workspace. SAFE has workspace-lifetime caches but a synthetic profile and isolated host credentials/configuration. Select FULL only when the user intends the Agent to use the current Windows user's normal development environment; FULL permits normal Git/GitHub CLI, SDK, package-manager, hooks/signing and process-control behavior, including commands invoked from PowerShell/cmd/build scripts. CWapi does not parse arbitrary shell text as a security boundary in FULL.
+
+Network access is selected independently in either profile. Remote Git Rewrite is a separate advanced capability and defaults OFF; enable it only for an intended force/delete remote update. Unsafe push transports, receive-pack injection, CWapi recovery-ref publication, protected internal paths and automatic elevation remain denied. Potentially destructive direct local Git operations create recovery refs when possible.
+
+For ordinary bounded work, omit `action` and use foreground `run`. For a development server, watcher, GUI or browser-auth flow, use `action=start`, retain `process_id`, inspect with bounded `action=status`, and finish with `action=stop`. A terminal process state ends polling. Closing the Coding session also stops that workspace's persistent processes.
 
 Call `coding_close(repository_url)` when the task is genuinely finished. Closing releases only the repository active session owner. It does not reset or clean Git, delete uncommitted changes, or delete the durable workspace. If a conversation disappears before close, a later conversation uses the same repository with `coding_open(..., resume=true)`.
 
